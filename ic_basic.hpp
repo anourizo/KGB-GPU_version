@@ -1788,7 +1788,7 @@ parameter * params, int & numparam)
 				parallel.abortForce();
 			}
 				
-			rescale = (Hconf(a, fourpiG, cosmo) - 100. * (Hconf(1.005 * a, fourpiG, cosmo) - Hconf(0.995 * a, fourpiG, cosmo))) * a * a;
+			rescale = (Hconf(a, fourpiG, cosmo) - 100. * (Hconf(1.005 * a, fourpiG, cosmo) - Hconf(0.995 * a, fourpiG, cosmo)));
 		}
 
 		if (sim.gr_flag == 0)
@@ -1808,6 +1808,22 @@ parameter * params, int & numparam)
 		gsl_spline_free(tk_d1);
 		gsl_spline_free(tk_t1);
 
+		if (sim.gr_flag > 0)
+		{
+			for (i = 0; i < tk_t2->size; i++)
+				temp1[i] = 3. * tk_t2->y[i];
+		}
+		else
+		{
+			if (ic.tkfile[0] != '\0')
+			{
+				COUT << COLORTEXT_YELLOW << " /!\\ warning" << COLORTEXT_RESET << ": gauge correction for N-body gauge velocities cannot be computed accurately from the transfer functions at a single redshift!" << endl;
+			}
+
+			for (i = 0; i < tk_t2->size; i++)
+				temp1[i] = 0.;
+		}
+
 #ifdef HAVE_CLASS
 		if (ic.tkfile[0] == '\0')
 		{	
@@ -1821,10 +1837,8 @@ parameter * params, int & numparam)
 				gsl_spline_free(tk_d1);
 				gsl_spline_free(tk_t1);
 			}
+			
 			loadTransferFunctions(class_background, class_perturbs, tk_d1, tk_t1, "h", sim.boxsize, sim.z_in, cosmo.h);
-
-			for (i = 0; i < tk_t1->size; i++)
-					temp1[i] += tk_t1->y[i] * 0.5;
 		}
 		else
 #endif
@@ -1836,23 +1850,13 @@ parameter * params, int & numparam)
 				COUT << " error: transfer functions were empty!" << endl;
 				parallel.abortForce();
 			}
-
-			for (i = 0; i < tk_t1->size; i++)
-					temp1[i] = tk_t1->y[i] * 0.5;
 		}
+
+		for (i = 0; i < tk_t1->size; i++)
+			temp1[i] += tk_t1->y[i] * 0.5;
 
 		gsl_spline_free(tk_d1);
 		gsl_spline_free(tk_t1);
-
-		if (sim.gr_flag > 0)
-		{
-			for (i = 0; i < tk_t2->size; i++)
-				temp1[i] += 3. * tk_t2->y[i];
-		}
-		else if (ic.tkfile[0] != '\0')
-		{
-			COUT << COLORTEXT_YELLOW << " /!\\ warning" << COLORTEXT_RESET << ": gauge correction for N-body gauge velocities cannot be computed accurately from the transfer functions at a single redshift!" << endl;
-		}
 
 		vgaugespline = gsl_spline_alloc(gsl_interp_cspline, tk_t2->size);
 		gsl_spline_init(vgaugespline, tk_t2->x, temp1, tk_t2->size);

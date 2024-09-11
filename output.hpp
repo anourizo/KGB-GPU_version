@@ -2246,6 +2246,7 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 				IDbacklog[l][p].insert(IDcombuf1[q]);
 
 			free(IDcombuf1);
+			IDcombuf1 = NULL;
 
 			// compute length of IDcombuf2
 			if (IDlog_multiplicity > 1)
@@ -2255,6 +2256,7 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 				IDbacklog[l][p].insert(IDcombuf2[q]);
 
 			free(IDcombuf2);
+			IDcombuf2 = NULL;
 
 			// compute length of IDcombuf3
 			j = IDlog_sizes_recv0[0] + IDlog_sizes_recv0[1] + IDlog_sizes_recv0[2];
@@ -2266,6 +2268,7 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 				IDbacklog[l][p].insert(IDcombuf3[q]);
 
 			free(IDcombuf3);
+			IDcombuf3 = NULL;
 
 			// compute length of IDcombuf4
 			if (IDlog_multiplicity > 1)
@@ -2277,6 +2280,7 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 				IDbacklog[l][p].insert(IDcombuf4[q]);
 
 			free(IDcombuf4);
+			IDcombuf4 = NULL;
 
 			// ingest local IDs
 

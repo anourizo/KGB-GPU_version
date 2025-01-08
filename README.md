@@ -1,6 +1,6 @@
-# gevolution-1.3
+# gevolution-2.0
 
-Copyright (c) 2015-2024 Julian Adamek
+Copyright (c) 2015-2025 Julian Adamek
 (Université de Genève & Observatoire de Paris & Queen Mary University of London & Universität Zürich)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -26,7 +26,7 @@ Software.**
 Before compilation, make sure that all required external libraries are
 installed:
 
-* LATfield2 [version 1.1](https://gitlab.uzh.ch/julian.adamek/LATfield2.git)
+* LATfield2 [version 1.1 with GPU support](https://gitlab.uzh.ch/julian.adamek/LATfield2.git)
 * FFTW version 3
 * GNU Scientific Library (GSL) including CBLAS
 * HDF5

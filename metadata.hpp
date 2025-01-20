@@ -6,14 +6,14 @@
 //
 // Author: Julian Adamek (Université de Genève & Observatoire de Paris & Queen Mary University of London & Universität Zürich)
 //
-// Last modified: September 2024
+// Last modified: January 2025
 //
 //////////////////////////
 
 #ifndef METADATA_HEADER
 #define METADATA_HEADER
 
-#define GEVOLUTION_VERSION 1.3
+#define GEVOLUTION_VERSION 2.0
 
 #ifndef GRADIENT_ORDER
 #define GRADIENT_ORDER 1

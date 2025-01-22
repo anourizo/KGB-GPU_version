@@ -38,7 +38,7 @@ class perfParticles_gevolution: public perfParticles<part, part_info>
 		void saveGadget2(string filename, gadget2_header & hdr, lightcone_geometry & lightcone, double dist, double dtau, double dtau_old, double dadtau, double vertex[MAX_INTERSECTS][3], const int vertexcount, set<long> & IDbacklog, vector<long> * IDprelog, Field<Real> * phi, const int tracer_factor = 1);
 		void loadGadget2(string filename, gadget2_header & hdr);
 
-		__host__ __device__ void bufferTracerParticle(int row, int idx, double dtau_pos, double dtau_vel, double a, double boxsize, Field<Real> * phi, float * posdata, float * veldata, long * IDs, unsigned long long int ,  float * pos_offset = nullptr);
+		__host__ __device__ void bufferTracerParticle(int row, int idx, double dtau_pos, double dtau_vel, double a, double boxsize, Field<Real> * phi, float * posdata, float * veldata, long * IDs, unsigned long long int buffer_idx, float * pos_offset = nullptr);
 };
 
 template <typename part, typename part_info, typename part_dataType>
@@ -1543,26 +1543,33 @@ void Particles_gevolution<part,part_info,part_dataType>::loadGadget2(string file
 
 // CUDA kernel to add particles
 template <typename part, typename part_info>
-__global__ void add_particles(perfParticles<part, part_info> * pcl, float * posdata, float * veldata, void * IDs, uint32_t count)
+__global__ void add_particles(perfParticles<part, part_info> * pcl, float * posdata, float * veldata, void * IDs, uint32_t count, unsigned long long int * buffer_idx)
 {
 	uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
 	
 	if (i < count)
 	{
-		part pcl_new;
+		int coord[3];
+		Site x(pcl->lat_);
 
+		pcl->getPartCoord(posdata+3*i, coord);
+
+		if (x.setCoord(coord))
+		{
+			unsigned long long int idx = atomicAdd(buffer_idx, 1);
+
+			pcl->p[3*idx] = posdata[3*i];
+			pcl->p[3*idx+1] = posdata[3*i+1];
+			pcl->p[3*idx+2] = posdata[3*i+2];
+			pcl->q[3*idx] = veldata[3*i];
+			pcl->q[3*idx+1] = veldata[3*i+1];
+			pcl->q[3*idx+2] = veldata[3*i+2];
 #if GADGET_ID_BYTES == 8
-		pcl_new.ID = *((int64_t *) IDs + i);
-#else		
-		pcl_new.ID = *((int32_t *) IDs + i);
+			pcl->other[idx] = *((int64_t *) IDs + i);
+#else
+			pcl->other[idx] = *((int32_t *) IDs + i);
 #endif
-		pcl_new.pos[0] = posdata[3*i];
-		pcl_new.pos[1] = posdata[3*i+1];
-		pcl_new.pos[2] = posdata[3*i+2];
-		pcl_new.vel[0] = veldata[3*i];
-		pcl_new.vel[1] = veldata[3*i+1];
-		pcl_new.vel[2] = veldata[3*i+2];
-		pcl->addParticle_global(pcl_new);
+		}
 	}
 }
 
@@ -1637,15 +1644,41 @@ void perfParticles_gevolution<part,part_info>::loadGadget2(string filename, gadg
 				veldata[i] *= hdr.time / rescale_vel;
 			}
 
-			add_particles<part, part_info><<<count/128+1, 128>>>(this, posdata, veldata, IDs, count);
+			int local_count = 0;
 
-			auto success = cudaDeviceSynchronize();
-
-			if (success != cudaSuccess)
+#pragma omp parallel for reduction(+:local_count)
+			for (int i = 0; i < count; i++)
 			{
-				COUT << COLORTEXT_RED << " error" << COLORTEXT_RESET << ": CUDA error when loading particles!" << endl;
-				MPI_File_close(&infile);
-				throw std::runtime_error("CUDA error when loading particles!");
+				int coord[3];
+				Site x(this->lat_);
+				this->getPartCoord(posdata+3*i, coord);
+				if (x.setCoord(coord))
+				{
+					local_count++;
+				}
+			}
+
+			if (this->num_particles_ + local_count > this->total_capacity_)
+			{
+				this->resizeGlobalBuffers(this->num_particles_ + local_count + this->extra_capacity_);
+			}
+
+			if (local_count > 0)
+			{
+				unsigned long long int buffer_idx = this->num_particles_;
+
+				add_particles<part, part_info><<<count/128+1, 128>>>(this, posdata, veldata, IDs, count, &buffer_idx);
+
+				auto success = cudaDeviceSynchronize();
+
+				if (success != cudaSuccess)
+				{
+					COUT << COLORTEXT_RED << " error" << COLORTEXT_RESET << ": CUDA error when loading particles!" << endl;
+					MPI_File_close(&infile);
+					throw std::runtime_error("CUDA error when loading particles!");
+				}
+
+				this->num_particles_ += local_count;
 			}
 			
 			npart += count;

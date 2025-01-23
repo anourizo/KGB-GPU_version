@@ -19,6 +19,18 @@
 
 using namespace LATfield2;
 
+template <typename part, typename part_info>
+class perfParticles_gevolution;
+
+template <typename part, typename part_info>
+__global__ void count_tracer_particles(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, long * npart, int * npart_row);
+
+template <typename part, typename part_info>
+__global__ void buffer_tracer_particles(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, double dtau_pos, double dtau_vel, double a, double boxsize, Field<Real> * phi, float * posdata, float * veldata, long * IDs, long row_offset, unsigned long long int * buffer_count);
+
+template <typename part, typename part_info>
+__global__ void add_particles(perfParticles_gevolution<part, part_info> * pcl, float * posdata, float * veldata, void * IDs, uint32_t count, unsigned long long int * buffer_idx);
+
 template <typename part, typename part_info, typename part_dataType>
 class Particles_gevolution: public Particles<part, part_info, part_dataType>
 {
@@ -39,6 +51,15 @@ class perfParticles_gevolution: public perfParticles<part, part_info>
 		void loadGadget2(string filename, gadget2_header & hdr);
 
 		__host__ __device__ void bufferTracerParticle(int row, int idx, double dtau_pos, double dtau_vel, double a, double boxsize, Field<Real> * phi, float * posdata, float * veldata, long * IDs, unsigned long long int buffer_idx, float * pos_offset = nullptr);
+
+		template <typename part2, typename part_info2>
+		friend __global__ void count_tracer_particles(perfParticles_gevolution<part2, part_info2> * pcl, int tracer_factor, long * npart, int * npart_row);
+
+		template <typename part2, typename part_info2>
+		friend __global__ void buffer_tracer_particles(perfParticles_gevolution<part2, part_info2> * pcl, int tracer_factor, double dtau_pos, double dtau_vel, double a, double boxsize, Field<Real> * phi, float * posdata, float * veldata, long * IDs, long row_offset, unsigned long long int * buffer_count);
+
+		template <typename part2, typename part_info2>
+		friend __global__ void add_particles(perfParticles_gevolution<part2, part_info2> * pcl, float * posdata, float * veldata, void * IDs, uint32_t count, unsigned long long int * buffer_idx);
 };
 
 template <typename part, typename part_info, typename part_dataType>
@@ -257,7 +278,7 @@ void Particles_gevolution<part,part_info,part_dataType>::saveGadget2(string file
 
 // CUDA kernel to count particles to be written
 template <typename part, typename part_info>
-__global__ void count_tracer_particles(perfParticles<part, part_info> * pcl, int tracer_factor, long * npart, int * npart_row)
+__global__ void count_tracer_particles(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, long * npart, int * npart_row)
 {
 	int row = blockIdx.x;
 	int thread_id = threadIdx.x;
@@ -278,7 +299,7 @@ __global__ void count_tracer_particles(perfParticles<part, part_info> * pcl, int
 
 // CUDA kernel to write particles to buffers
 template <typename part, typename part_info>
-__global__ void buffer_tracer_particles(perfParticles<part, part_info> * pcl, int tracer_factor, double dtau_pos, double dtau_vel, double a, double boxsize, Field<Real> * phi, float * posdata, float * veldata, long * IDs, long row_offset, unsigned long long int * buffer_count)
+__global__ void buffer_tracer_particles(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, double dtau_pos, double dtau_vel, double a, double boxsize, Field<Real> * phi, float * posdata, float * veldata, long * IDs, long row_offset, unsigned long long int * buffer_count)
 {
 	int row = blockIdx.x + row_offset;
 	int thread_id = threadIdx.x;
@@ -1543,18 +1564,17 @@ void Particles_gevolution<part,part_info,part_dataType>::loadGadget2(string file
 
 // CUDA kernel to add particles
 template <typename part, typename part_info>
-__global__ void add_particles(perfParticles<part, part_info> * pcl, float * posdata, float * veldata, void * IDs, uint32_t count, unsigned long long int * buffer_idx)
+__global__ void add_particles(perfParticles_gevolution<part, part_info> * pcl, float * posdata, float * veldata, void * IDs, uint32_t count, unsigned long long int * buffer_idx)
 {
 	uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
 	
 	if (i < count)
 	{
 		int coord[3];
-		Site x(pcl->lat_);
 
-		pcl->getPartCoord(posdata+3*i, coord);
+		pcl->getPartCoordLocal(posdata+3*i, coord);
 
-		if (x.setCoord(coord))
+		if (coord[0] >= 0 && coord[0] < pcl->lat_size_local_[0] && coord[1] >= 0 && coord[1] < pcl->lat_size_local_[1] && coord[2] >= 0 && coord[2] < pcl->lat_size_local_[2])
 		{
 			unsigned long long int idx = atomicAdd(buffer_idx, 1);
 
@@ -1599,16 +1619,30 @@ void perfParticles_gevolution<part,part_info>::loadGadget2(string filename, gadg
 	{
 		MPI_File_open(parallel.lat_world_comm(), filename.c_str(), MPI_MODE_RDONLY, MPI_INFO_NULL, &infile);
 
-		MPI_File_read_all(infile, &blocksize, 1, MPI_UNSIGNED, &status);
+		// check if file could be opened
+		if (infile == MPI_FILE_NULL)
+		{
+			COUT << COLORTEXT_RED << " error" << COLORTEXT_RESET << ": could not open file " << filename << "!" << endl;
+			return;
+		}
 
-		if (blocksize != sizeof(hdr))
+		auto read_success = MPI_File_read_all(infile, &blocksize, 1, MPI_UNSIGNED, &status);
+
+		if (blocksize != sizeof(hdr) || read_success != MPI_SUCCESS)
 		{
 			COUT << COLORTEXT_RED << " error" << COLORTEXT_RESET << ": file type not recognized when reading Gadget2 file!" << endl;
 			MPI_File_close(&infile);
 			return;
 		}
 
-		MPI_File_read_all(infile, &hdr, sizeof(hdr), MPI_BYTE, &status);
+		read_success = MPI_File_read_all(infile, &hdr, sizeof(hdr), MPI_BYTE, &status);
+
+		if (read_success != MPI_SUCCESS)
+		{
+			COUT << COLORTEXT_RED << " error" << COLORTEXT_RESET << ": could not read header from file " << filename << "!" << endl;
+			MPI_File_close(&infile);
+			return;
+		}
 
 		rescale_vel /= sqrt(hdr.time);
 		offset_pos = (MPI_Offset) sizeof(hdr) + (MPI_Offset) (3 * sizeof(uint32_t));
@@ -1620,20 +1654,43 @@ void perfParticles_gevolution<part,part_info>::loadGadget2(string filename, gadg
 		{
 			count = (hdr.npart[1] - npart > PCLBUFFER) ? PCLBUFFER : (hdr.npart[1] - npart);
 
-			MPI_File_read_all(infile, posdata, 3 * count, MPI_FLOAT, &status);
+			read_success = MPI_File_read_all(infile, posdata, 3 * count, MPI_FLOAT, &status);
+
+			if (read_success != MPI_SUCCESS)
+			{
+				COUT << COLORTEXT_RED << " error" << COLORTEXT_RESET << ": could not read particle positions from file " << filename << "!" << endl;
+				MPI_File_close(&infile);
+				return;
+			}
+
 			offset_pos += (MPI_Offset) (3 * count * sizeof(float));
 			MPI_File_seek(infile, offset_vel, MPI_SEEK_SET);
-			MPI_File_read_all(infile, veldata, 3 * count, MPI_FLOAT, &status);
+			read_success = MPI_File_read_all(infile, veldata, 3 * count, MPI_FLOAT, &status);
+
+			if (read_success != MPI_SUCCESS)
+			{
+				COUT << COLORTEXT_RED << " error" << COLORTEXT_RESET << ": could not read particle velocities from file " << filename << "!" << endl;
+				MPI_File_close(&infile);
+				return;
+			}
+
 			offset_vel += (MPI_Offset) (3 * count * sizeof(float));
 			MPI_File_seek(infile, offset_ID, MPI_SEEK_SET);
 #if GADGET_ID_BYTES == 8
-			MPI_File_read_all(infile, IDs, count * sizeof(int64_t), MPI_BYTE, &status);
+			read_success = MPI_File_read_all(infile, IDs, count * sizeof(int64_t), MPI_BYTE, &status);
 			offset_ID += (MPI_Offset) (count * sizeof(int64_t));
 #else
-			MPI_File_read_all(infile, IDs, count * sizeof(int32_t), MPI_BYTE, &status);
+			read_success = MPI_File_read_all(infile, IDs, count * sizeof(int32_t), MPI_BYTE, &status);
 			offset_ID += (MPI_Offset) (count * sizeof(int32_t));
 #endif
 			MPI_File_seek(infile, offset_pos, MPI_SEEK_SET);
+
+			if (read_success != MPI_SUCCESS)
+			{
+				COUT << COLORTEXT_RED << " error" << COLORTEXT_RESET << ": could not read particle IDs from file " << filename << "!" << endl;
+				MPI_File_close(&infile);
+				return;
+			}
 
 #pragma omp parallel for
 			for (int i = 0; i < 3 * count; i++)
@@ -1650,7 +1707,7 @@ void perfParticles_gevolution<part,part_info>::loadGadget2(string filename, gadg
 			for (int i = 0; i < count; i++)
 			{
 				int coord[3];
-				Site x(this->lat_);
+				Site x(*(this->lat_));
 				this->getPartCoord(posdata+3*i, coord);
 				if (x.setCoord(coord))
 				{
@@ -1689,9 +1746,11 @@ void perfParticles_gevolution<part,part_info>::loadGadget2(string filename, gadg
 
 		if (hdr.num_files > 1)
 		{
-			filename = filename.substr(0, filename.find_last_of('.')) + to_string(nfile);
+			filename = filename.substr(0, filename.find_last_of('.')+1) + to_string(nfile);
 		}
 	} while (nfile < hdr.num_files);
+
+	this->updateRowBuffers();
 	
 	free(posdata);
 	free(veldata);

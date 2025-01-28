@@ -22,7 +22,7 @@
 //
 // Author: Julian Adamek (Université de Genève & Observatoire de Paris & Queen Mary University of London & Universität Zürich)
 //
-// Last modified: December 2024
+// Last modified: January 2025
 //
 //////////////////////////
 
@@ -711,7 +711,7 @@ void solveModifiedPoissonFT(Field<Cplx> & sourceFT, Field<Cplx> & potFT, Real co
 // 
 //////////////////////////
 
-Real update_q(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> ** fields, Site * sites, int nfield, double * params, double * outputs, int noutputs)
+__host__ __device__ Real update_q(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
 {
 #define phi (*fields[0])
 #define chi (*fields[1])
@@ -836,6 +836,15 @@ Real update_q(double dtau, double dx, part_simple * part, double * ref_dist, par
 #undef xB
 }
 
+// callable struct for update_q
+struct update_q_functor
+{
+	__host__ __device__ Real operator()(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+	{
+		return update_q(dtau, dx, part, ref_dist, partInfo, fields, sites, nfield, params, outputs, noutputs);
+	}
+};
+
 
 //////////////////////////
 // update_q_Newton
@@ -865,7 +874,7 @@ Real update_q(double dtau, double dx, part_simple * part, double * ref_dist, par
 // 
 //////////////////////////
 
-Real update_q_Newton(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> ** fields, Site * sites, int nfield, double * params, double * outputs, int noutputs)
+__host__ __device__ Real update_q_Newton(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
 {
 #define psi (*fields[0])
 #define xpsi (sites[0])
@@ -934,6 +943,15 @@ Real update_q_Newton(double dtau, double dx, part_simple * part, double * ref_di
 #undef xchi
 }
 
+// callable struct for update_q_Newton
+struct update_q_Newton_functor
+{
+	__host__ __device__ Real operator()(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+	{
+		return update_q_Newton(dtau, dx, part, ref_dist, partInfo, fields, sites, nfield, params, outputs, noutputs);
+	}
+};
+
 
 //////////////////////////
 // update_pos
@@ -967,7 +985,7 @@ Real update_q_Newton(double dtau, double dx, part_simple * part, double * ref_di
 // 
 //////////////////////////
 
-void update_pos(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> ** fields, Site * sites, int nfield, double * params, double * outputs, int noutputs)
+__host__ __device__ void update_pos(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
 {
 	Real v[3];
 	Real v2 = (*part).vel[0] * (*part).vel[0] + (*part).vel[1] * (*part).vel[1] + (*part).vel[2] * (*part).vel[2];
@@ -1039,6 +1057,15 @@ void update_pos(double dtau, double dx, part_simple * part, double * ref_dist, p
 	}   
 }
 
+// callable struct for update_pos
+struct update_pos_functor
+{
+	__host__ __device__ void operator()(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+	{
+		update_pos(dtau, dx, part, ref_dist, partInfo, fields, sites, nfield, params, outputs, noutputs);
+	}
+};
+
 
 //////////////////////////
 // update_pos_Newton
@@ -1066,14 +1093,23 @@ void update_pos(double dtau, double dx, part_simple * part, double * ref_dist, p
 // 
 //////////////////////////
 
-void update_pos_Newton(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> ** fields, Site * sites, int nfield, double * params, double * outputs, int noutputs)
+__host__ __device__ void update_pos_Newton(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
 {	  
 	for (int l=0;l<3;l++) (*part).pos[l] += dtau * (*part).vel[l] / params[0];   
 }
 
+// callable struct for update_pos_Newton
+struct update_pos_Newton_functor
+{
+	__host__ __device__ void operator()(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+	{
+		update_pos_Newton(dtau, dx, part, ref_dist, partInfo, fields, sites, nfield, params, outputs, noutputs);
+	}
+};
+
 
 //////////////////////////
-// projection_T00_project
+// projection_T00_project (1)
 //////////////////////////
 // Description:
 //   Particle-mesh projection for T00, including geometric corrections
@@ -1192,8 +1228,120 @@ void projection_T00_project(Particles<part, part_info, part_dataType> * pcls, Fi
 #define projection_T00_comm scalarProjectionCIC_comm
 
 
+__host__ __device__ void particle_T00_project(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+{	
+	Real mass = partInfo.mass * params[1] / (dx*dx*dx);
+
+	if (nfield > 1)
+	{
+		Real f2 = (*part).vel[0] * (*part).vel[0] + (*part).vel[1] * (*part).vel[1] + (*part).vel[2] * (*part).vel[2];
+		Real e = sqrt(f2 + params[0] * params[0]);
+		Real f = Real(3) * e + f2 / e;
+		f2 = (Real(0.5) * f * f + f2 / (Real(1) + f2 / params[0] / params[0])) / e;
+		mass /= params[0];
+
+		Real phi[8];
+
+		phi[0] = (*fields[1])(sites[1]);
+		phi[1] = (*fields[1])(sites[1]+2);
+		phi[2] = (*fields[1])(sites[1]+1);
+		phi[3] = (*fields[1])(sites[1]+1+2);
+		phi[4] = (*fields[1])(sites[1]+0);
+		phi[5] = (*fields[1])(sites[1]+0+2);
+		phi[6] = (*fields[1])(sites[1]+0+1);
+		phi[7] = (*fields[1])(sites[1]+0+1+2);
+
+		#ifdef __CUDA_ARCH__
+		atomicAdd(&(*fields[0])(sites[0]), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[0] + f2 * phi[0] * phi[0]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+2), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * (e + f * phi[1] + f2 * phi[1] * phi[1]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+1), (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[2] + f2 * phi[2] * phi[2]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+1+2), (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (e + f * phi[3] + f2 * phi[3] * phi[3]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[4] + f2 * phi[4] * phi[4]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+2), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * (e + f * phi[5] + f2 * phi[5] * phi[5]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+1), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[6] + f2 * phi[6] * phi[6]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+1+2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (e + f * phi[7] + f2 * phi[7] * phi[7]) * mass);
+		#else
+		(*fields[0])(sites[0]) += (1.-ref_dist[0]) * (1.-ref_dist[1]) * (1.-ref_dist[2]) * (e + f * phi[0] + f2 * phi[0] * phi[0]) * mass;
+		(*fields[0])(sites[0]+2) += (1.-ref_dist[0]) * (1.-ref_dist[1]) * ref_dist[2] * (e + f * phi[1] + f2 * phi[1] * phi[1]) * mass;
+		(*fields[0])(sites[0]+1) += (1.-ref_dist[0]) * ref_dist[1] * (1.-ref_dist[2]) * (e + f * phi[2] + f2 * phi[2] * phi[2]) * mass;
+		(*fields[0])(sites[0]+1+2) += (1.-ref_dist[0]) * ref_dist[1] * ref_dist[2] * (e + f * phi[3] + f2 * phi[3] * phi[3]) * mass;
+		(*fields[0])(sites[0]+0) += ref_dist[0] * (1.-ref_dist[1]) * (1.-ref_dist[2]) * (e + f * phi[4] + f2 * phi[4] * phi[4]) * mass;
+		(*fields[0])(sites[0]+0+2) += ref_dist[0] * (1.-ref_dist[1]) * ref_dist[2] * (e + f * phi[5] + f2 * phi[5] * phi[5]) * mass;
+		(*fields[0])(sites[0]+0+1) += ref_dist[0] * ref_dist[1] * (1.-ref_dist[2]) * (e + f * phi[6] + f2 * phi[6] * phi[6]) * mass;
+		(*fields[0])(sites[0]+0+1+2) += ref_dist[0] * ref_dist[1] * ref_dist[2] * (e + f * phi[7] + f2 * phi[7] * phi[7]) * mass;
+		#endif
+	}
+	else
+	{
+		#ifdef __CUDA_ARCH__
+		atomicAdd(&(*fields[0])(sites[0]), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+2), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+1), (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+1+2), (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+2), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+1), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+1+2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * mass);
+		#else
+		(*fields[0])(sites[0]) += (1.-ref_dist[0]) * (1.-ref_dist[1]) * (1.-ref_dist[2]) * mass;
+		(*fields[0])(sites[0]+2) += (1.-ref_dist[0]) * (1.-ref_dist[1]) * ref_dist[2] * mass;
+		(*fields[0])(sites[0]+1) += (1.-ref_dist[0]) * ref_dist[1] * (1.-ref_dist[2]) * mass;
+		(*fields[0])(sites[0]+1+2) += (1.-ref_dist[0]) * ref_dist[1] * ref_dist[2] * mass;
+		(*fields[0])(sites[0]+0) += ref_dist[0] * (1.-ref_dist[1]) * (1.-ref_dist[2]) * mass;
+		(*fields[0])(sites[0]+0+2) += ref_dist[0] * (1.-ref_dist[1]) * ref_dist[2] * mass;
+		(*fields[0])(sites[0]+0+1) += ref_dist[0] * ref_dist[1] * (1.-ref_dist[2]) * mass;
+		(*fields[0])(sites[0]+0+1+2) += ref_dist[0] * ref_dist[1] * ref_dist[2] * mass;
+		#endif
+	}
+}
+
+// callable struct for particle_T00_project
+
+struct particle_T00_project_functor
+{
+	__host__ __device__ void operator()(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+	{
+		particle_T00_project(dtau, dx, part, ref_dist, partInfo, fields, sites, nfield, params, outputs, noutputs);
+	}
+};
+
+
 //////////////////////////
-// projection_T0i_project
+// projection_T00_project (2)
+//////////////////////////
+// Description:
+//   Particle-mesh projection for T00, including geometric corrections
+// 
+// Arguments:
+//   pcls       pointer to particle handler
+//   T00        pointer to target field
+//   a          scale factor at projection (needed in order to convert
+//              canonical momenta to energies)
+//   phi        pointer to Bardeen potential which characterizes the
+//              geometric corrections (volume distortion); can be set to
+//              nullptr which will result in no corrections applied
+//   coeff      coefficient applied to the projection operation (default 1)
+//
+// Returns:
+// 
+//////////////////////////
+
+void projection_T00_project(perfParticles<part_simple, part_simple_info> * pcls, Field<Real> * T00, double a = 1., Field<Real> * phi = nullptr, double coeff = 1.)
+{
+	Field<Real> * fields[2];
+	fields[0] = T00;
+	fields[1] = phi;
+
+	double params[2];
+	params[0] = a;
+	params[1] = coeff;
+
+	pcls->projectParticles(particle_T00_project_functor(), fields, (phi == nullptr ? 1 : 2), params);
+}
+
+
+//////////////////////////
+// projection_T0i_project (1)
 //////////////////////////
 // Description:
 //   Particle-mesh projection for T0i, including geometric corrections
@@ -1315,8 +1463,140 @@ void projection_T0i_project(Particles<part,part_info,part_dataType> * pcls, Fiel
 #define projection_T0i_comm vectorProjectionCICNGP_comm
 
 
+__host__ __device__ void particle_T0i_project(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+{	
+	Real mass = partInfo.mass * (*params) / (dx*dx*dx);
+
+	if (nfield > 1)
+	{
+		Real phi[8];
+
+		phi[0] = (*fields[1])(sites[1]);
+		phi[1] = (*fields[1])(sites[1]+2);
+		phi[2] = (*fields[1])(sites[1]+1);
+		phi[3] = (*fields[1])(sites[1]+1+2);
+		phi[4] = (*fields[1])(sites[1]+0);
+		phi[5] = (*fields[1])(sites[1]+0+2);
+		phi[6] = (*fields[1])(sites[1]+0+1);
+		phi[7] = (*fields[1])(sites[1]+0+1+2);
+
+		#ifdef __CUDA_ARCH__
+		atomicAdd(&(*fields[0])(sites[0],0), (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[0] + phi[4]) * mass * (*part).vel[0]);
+		atomicAdd(&(*fields[0])(sites[0],1), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[0] + phi[2]) * mass * (*part).vel[1]);
+		atomicAdd(&(*fields[0])(sites[0],2), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1) + phi[0] + phi[1]) * mass * (*part).vel[2]);
+
+		atomicAdd(&(*fields[0])(sites[0]+0,1), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[4] + phi[6]) * mass * (*part).vel[1]);
+		atomicAdd(&(*fields[0])(sites[0]+0,2), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1) + phi[4] + phi[5]) * mass * (*part).vel[2]);
+
+		atomicAdd(&(*fields[0])(sites[0]+1,0), static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[2] + phi[6]) * mass * (*part).vel[0]);
+		atomicAdd(&(*fields[0])(sites[0]+1,2), static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1) + phi[2] + phi[3]) * mass * (*part).vel[2]);
+
+		atomicAdd(&(*fields[0])(sites[0]+2,0), static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1) + phi[1] + phi[5]) * mass * (*part).vel[0]);
+		atomicAdd(&(*fields[0])(sites[0]+2,1), static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1) + phi[1] + phi[3]) * mass * (*part).vel[1]);
+
+		atomicAdd(&(*fields[0])(sites[0]+1+2,0), static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (Real(1) + phi[3] + phi[7]) * mass * (*part).vel[0]);
+		atomicAdd(&(*fields[0])(sites[0]+0+2,1), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[2]) * (Real(1) + phi[5] + phi[7]) * mass * (*part).vel[1]);
+		atomicAdd(&(*fields[0])(sites[0]+0+1,2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1) + phi[6] + phi[7]) * mass * (*part).vel[2]);
+		#else
+		(*fields[0])(sites[0],0) += (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[0] + phi[4]) * mass * (*part).vel[0];
+		(*fields[0])(sites[0],1) += (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[0] + phi[2]) * mass * (*part).vel[1];
+		(*fields[0])(sites[0],2) += (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1) + phi[0] + phi[1]) * mass * (*part).vel[2];
+
+		(*fields[0])(sites[0]+0,1) += static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[4] + phi[6]) * mass * (*part).vel[1];
+		(*fields[0])(sites[0]+0,2) += static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1) + phi[4] + phi[5]) * mass * (*part).vel[2];
+
+		(*fields[0])(sites[0]+1,0) += static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[2] + phi[6]) * mass * (*part).vel[0];
+		(*fields[0])(sites[0]+1,2) += static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1) + phi[2] + phi[3]) * mass * (*part).vel[2];
+
+		(*fields[0])(sites[0]+2,0) += static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1) + phi[1] + phi[5]) * mass * (*part).vel[0];
+		(*fields[0])(sites[0]+2,1) += static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1) + phi[1] + phi[3]) * mass * (*part).vel[1];
+
+		(*fields[0])(sites[0]+1+2,0) += static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (Real(1) + phi[3] + phi[7]) * mass * (*part).vel[0];
+		(*fields[0])(sites[0]+0+2,1) += static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[2]) * (Real(1) + phi[5] + phi[7]) * mass * (*part).vel[1];
+		(*fields[0])(sites[0]+0+1,2) += static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1) + phi[6] + phi[7]) * mass * (*part).vel[2];
+		#endif
+	}
+	else
+	{
+		#ifdef __CUDA_ARCH__
+		atomicAdd(&(*fields[0])(sites[0],0), (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[0]);
+		atomicAdd(&(*fields[0])(sites[0],1), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[1]);
+		atomicAdd(&(*fields[0])(sites[0],2), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * mass * (*part).vel[2]);
+
+		atomicAdd(&(*fields[0])(sites[0]+0,1), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[1]);
+		atomicAdd(&(*fields[0])(sites[0]+0,2), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * mass * (*part).vel[2]);
+
+		atomicAdd(&(*fields[0])(sites[0]+1,0), static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[0]);
+		atomicAdd(&(*fields[0])(sites[0]+1,2), static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[0])) * mass * (*part).vel[2]);
+
+		atomicAdd(&(*fields[0])(sites[0]+2,0), static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[1])) * mass * (*part).vel[0]);
+		atomicAdd(&(*fields[0])(sites[0]+2,1), static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[0])) * mass * (*part).vel[1]);
+
+		atomicAdd(&(*fields[0])(sites[0]+1+2,0), static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * mass * (*part).vel[0]);
+		atomicAdd(&(*fields[0])(sites[0]+0+2,1), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[2]) * mass * (*part).vel[1]);
+		atomicAdd(&(*fields[0])(sites[0]+0+1,2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * mass * (*part).vel[2]);
+		#else
+		(*fields[0])(sites[0],0) += (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[0];
+		(*fields[0])(sites[0],1) += (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[1];
+		(*fields[0])(sites[0],2) += (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * mass * (*part).vel[2];
+
+		(*fields[0])(sites[0]+0,1) += static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[1];
+		(*fields[0])(sites[0]+0,2) += static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * mass * (*part).vel[2];
+
+		(*fields[0])(sites[0]+1,0) += static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[0];
+		(*fields[0])(sites[0]+1,2) += static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[0])) * mass * (*part).vel[2];
+
+		(*fields[0])(sites[0]+2,0) += static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[1])) * mass * (*part).vel[0];
+		(*fields[0])(sites[0]+2,1) += static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[0])) * mass * (*part).vel[1];
+
+		(*fields[0])(sites[0]+1+2,0) += static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * mass * (*part).vel[0];
+		(*fields[0])(sites[0]+0+2,1) += static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[2]) * mass * (*part).vel[1];
+		(*fields[0])(sites[0]+0+1,2) += static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * mass * (*part).vel[2];
+		#endif
+	}
+}
+
+// callable struct for particle_T0i_project
+
+struct particle_T0i_project_functor
+{
+	__host__ __device__ void operator()(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+	{
+		particle_T0i_project(dtau, dx, part, ref_dist, partInfo, fields, sites, nfield, params, outputs, noutputs);
+	}
+};
+
+
 //////////////////////////
-// projection_Tij_project
+// projection_T0i_project (2)
+//////////////////////////
+// Description:
+//   Particle-mesh projection for T0i, including geometric corrections
+// 
+// Arguments:
+//   pcls       pointer to particle handler
+//   T0i        pointer to target field
+//   phi        pointer to Bardeen potential which characterizes the
+//              geometric corrections (volume distortion); can be set to
+//              NULL which will result in no corrections applied
+//   coeff      coefficient applied to the projection operation (default 1)
+//
+// Returns:
+// 
+//////////////////////////
+
+void projection_T0i_project(perfParticles<part_simple, part_simple_info> * pcls, Field<Real> * T0i, Field<Real> * phi = nullptr, double coeff = 1.)
+{
+	Field<Real> * fields[2];
+	fields[0] = T0i;
+	fields[1] = phi;
+
+	pcls->projectParticles(particle_T0i_project_functor(), fields, (phi == nullptr ? 1 : 2), &coeff);
+}
+
+
+//////////////////////////
+// projection_Tij_project (1)
 //////////////////////////
 // Description:
 //   Particle-mesh projection for Tij, including geometric corrections
@@ -1645,8 +1925,392 @@ void projection_Tij_project(Particles<part, part_info, part_dataType> * pcls, Fi
 #endif
 
 
+__host__ __device__ void particle_Tij_project(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+{
+	Real mass = partInfo.mass * params[1] / (dx*dx*dx) / params[0];
+	Real w;
+
+#ifdef CIC_PROJECT_TIJ
+	Real  tij[54];
+	Real  weightTensorGrid01[9];
+	Real  weightTensorGrid02[9];
+	Real  weightTensorGrid12[9];
+
+	if (ref_dist[0] > 0.5)
+	{
+		for (int j=0; j<3; j++)
+		{
+			weightTensorGrid01[j*3] = Real(0);
+			weightTensorGrid01[j*3+1] = 1.5 - ref_dist[0]; // weightScalarGridDown[0] + 0.5;
+			weightTensorGrid01[j*3+2] = ref_dist[0] - 0.5; // 0.5 - weightScalarGridDown[0];
+
+			weightTensorGrid02[j*3] = Real(0);
+			weightTensorGrid02[j*3+1] = 1.5 - ref_dist[0]; // weightScalarGridDown[0] + 0.5;
+			weightTensorGrid02[j*3+2] = ref_dist[0] - 0.5; // 0.5 - weightScalarGridDown[0];
+		}
+	}
+	else
+	{
+		for (int j=0; j<3; j++)
+		{
+			weightTensorGrid01[j*3] = 0.5 - ref_dist[0]; // weightScalarGridDown[0] - 0.5;
+			weightTensorGrid01[j*3+1] = 0.5 + ref_dist[0]; // 1.5 - weightScalarGridDown[0];
+			weightTensorGrid01[j*3+2] = Real(0);
+
+			weightTensorGrid02[j*3] = 0.5 - ref_dist[0]; // weightScalarGridDown[0] - 0.5;
+			weightTensorGrid02[j*3+1] = 0.5 + ref_dist[0]; // 1.5 - weightScalarGridDown[0];
+			weightTensorGrid02[j*3+2] = Real(0);
+		}
+	}
+
+	if (ref_dist[1] > 0.5)
+	{
+		for (int j=0; j<3; j++)
+		{
+			weightTensorGrid01[j] = Real(0);
+			weightTensorGrid01[j+3] *= 1.5 - ref_dist[1]; // weightScalarGridDown[1] + 0.5;
+			weightTensorGrid01[j+6] *= ref_dist[1] - 0.5; // 0.5 - weightScalarGridDown[1];
+
+			weightTensorGrid12[j*3] = Real(0);
+			weightTensorGrid12[j*3+1] = 1.5 - ref_dist[1]; // weightScalarGridDown[1] + 0.5;
+			weightTensorGrid12[j*3+2] = ref_dist[1] - 0.5; // 0.5 - weightScalarGridDown[1];
+		}
+	}
+	else
+	{
+		for (int j=0; j<3; j++)
+		{
+			weightTensorGrid01[j] *= 0.5 - ref_dist[1]; // weightScalarGridDown[1] - 0.5;
+			weightTensorGrid01[j+3] *= 0.5 + ref_dist[1]; // 1.5 - weightScalarGridDown[1];
+			weightTensorGrid01[j+6] = Real(0);
+
+			weightTensorGrid12[j*3] = 0.5 - ref_dist[1]; // weightScalarGridDown[1] - 0.5;
+			weightTensorGrid12[j*3+1] = 0.5 + ref_dist[1]; // 1.5 - weightScalarGridDown[1];
+			weightTensorGrid12[j*3+2] = Real(0);
+		}
+	}
+
+	if (ref_dist[2] > 0.5)
+	{
+		for (int j=0; j<3; j++)
+		{
+			weightTensorGrid02[j] = Real(0);
+			weightTensorGrid02[j+3] *= 1.5 - ref_dist[2]; // weightScalarGridDown[2] + 0.5;
+			weightTensorGrid02[j+6] *= ref_dist[2] - 0.5; // 0.5 - weightScalarGridDown[2];
+
+			weightTensorGrid12[j] = Real(0);
+			weightTensorGrid12[j+3] *= 1.5 - ref_dist[2]; // weightScalarGridDown[2] + 0.5;
+			weightTensorGrid12[j+6] *= ref_dist[2] - 0.5; // 0.5 - weightScalarGridDown[2];
+		}
+	}
+	else
+	{
+		for (int j=0; j<3; j++)
+		{
+			weightTensorGrid02[j] *= 0.5 - ref_dist[2]; // weightScalarGridDown[2] - 0.5;
+			weightTensorGrid02[j+3] *= 0.5 + ref_dist[2]; // 1.5 - weightScalarGridDown[2];
+			weightTensorGrid02[j+6] = Real(0);
+
+			weightTensorGrid12[j] *= 0.5 - ref_dist[2]; // weightScalarGridDown[2] - 0.5;
+			weightTensorGrid12[j+3] *= 0.5 + ref_dist[2]; // 1.5 - weightScalarGridDown[2];
+			weightTensorGrid12[j+6] = Real(0);
+		}
+	}
+#else	
+	Real  tij[24];
+#endif
+
+	Real f = (*part).vel[0] * (*part).vel[0] + (*part).vel[1] * (*part).vel[1] + (*part).vel[2] * (*part).vel[2];
+#ifdef ANISOTROPIC_EXPANSION
+	f -= (*part).vel[0] * (*part).vel[0] * static_cast<Real>(params[2]) + (*part).vel[1] * (*part).vel[1] * static_cast<Real>(params[5]) - (*part).vel[2] * (*part).vel[2] * (static_cast<Real>(params[2]) + static_cast<Real>(params[5])) + Real(2) * (*part).vel[0] * (*part).vel[1] * static_cast<Real>(params[3]) + Real(2) * (*part).vel[0] * (*part).vel[2] * static_cast<Real>(params[4]) + Real(2) * (*part).vel[1] * (*part).vel[2] * static_cast<Real>(params[6]);
+#endif
+	Real e = sqrt(f + static_cast<Real>(params[0]) * static_cast<Real>(params[0]));
+
+	if (nfield > 1)
+	{
+		f = Real(4) + static_cast<Real>(params[0]) * static_cast<Real>(params[0]) / (f + static_cast<Real>(params[0]) * static_cast<Real>(params[0]));
+		f *= (Real(1)-static_cast<Real>(ref_dist[0])) * ((Real(1)-static_cast<Real>(ref_dist[1])) * ((Real(1)-static_cast<Real>(ref_dist[2])) * (*fields[1])(sites[1]) + static_cast<Real>(ref_dist[2]) * (*fields[1])(sites[1]+2)) + static_cast<Real>(ref_dist[1]) * ((Real(1)-static_cast<Real>(ref_dist[2])) * (*fields[1])(sites[1]+1) + static_cast<Real>(ref_dist[2]) * (*fields[1])(sites[1]+1+2))) + static_cast<Real>(ref_dist[0]) * ((Real(1)-static_cast<Real>(ref_dist[1])) * ((Real(1)-static_cast<Real>(ref_dist[2])) * (*fields[1])(sites[1]+0) + static_cast<Real>(ref_dist[2]) * (*fields[1])(sites[1]+0+2)) + static_cast<Real>(ref_dist[1]) * ((Real(1)-static_cast<Real>(ref_dist[2])) * (*fields[1])(sites[1]+0+1) + static_cast<Real>(ref_dist[2]) * (*fields[1])(sites[1]+0+1+2)));
+		f += Real(1);
+	}
+	else
+	{
+		f = Real(1);
+	}
+
+	// diagonal components				
+	for (int i=0; i<3; i++)
+	{
+		w = f * mass * (*part).vel[i] * (*part).vel[i] / e;
+		//000
+		tij[0+i*8] = w * (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2]));
+		//001
+		tij[1+i*8] = w * (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]); 
+		//010
+		tij[2+i*8] = w * (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2]));
+		//011
+		tij[3+i*8] = w * (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]);
+		//100
+		tij[4+i*8] = w * static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2]));
+		//101
+		tij[5+i*8] = w * static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]);
+		//110
+		tij[6+i*8] = w * static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2]));
+		//111
+		tij[7+i*8] = w * static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]);
+	}
+
+	#ifdef __CUDA_ARCH__
+	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0],i,i), tij[8*i]);
+	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0,i,i), tij[4+8*i]);
+	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+1,i,i), tij[2+8*i]);
+	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+2,i,i), tij[1+8*i]);
+	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0+1,i,i), tij[6+8*i]);
+	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0+2,i,i), tij[5+8*i]);
+	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+1+2,i,i), tij[3+8*i]);
+	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0+1+2,i,i), tij[7+8*i]);
+	#else
+	for (int i=0; i<3; i++) (*fields[0])(sites[0],i,i) += tij[8*i];
+	for (int i=0; i<3; i++) (*fields[0])(sites[0]+0,i,i) += tij[4+8*i];
+	for (int i=0; i<3; i++) (*fields[0])(sites[0]+1,i,i) += tij[2+8*i];
+	for (int i=0; i<3; i++) (*fields[0])(sites[0]+2,i,i) += tij[1+8*i];	
+	for (int i=0; i<3; i++) (*fields[0])(sites[0]+0+1,i,i) += tij[6+8*i];
+	for (int i=0; i<3; i++) (*fields[0])(sites[0]+0+2,i,i) += tij[5+8*i];
+	for (int i=0; i<3; i++) (*fields[0])(sites[0]+1+2,i,i) += tij[3+8*i];
+	for (int i=0; i<3; i++) (*fields[0])(sites[0]+0+1+2,i,i) += tij[7+8*i];
+	#endif
+	
+	w = f * mass * (*part).vel[0] * (*part).vel[1] / e;
+#ifdef CIC_PROJECT_TIJ
+	for (int i = 0; i < 9; i++)
+	{
+		tij[i] = w * (Real(1)-static_cast<Real>(ref_dist[2])) * weightTensorGrid01[i];
+		tij[i+9] = w * static_cast<Real>(ref_dist[2]) * weightTensorGrid01[i];
+	}
+#else
+	tij[0] =  w * (Real(1)-static_cast<Real>(ref_dist[2]));
+	tij[1] =  w * static_cast<Real>(ref_dist[2]);
+#endif
+	
+	w = f * mass * (*part).vel[0] * (*part).vel[2] / e;
+#ifdef CIC_PROJECT_TIJ
+	for (int i = 0; i < 9; i++)
+	{
+		tij[i+18] = w * (Real(1)-static_cast<Real>(ref_dist[1])) * weightTensorGrid02[i];
+		tij[i+27] = w * static_cast<Real>(ref_dist[1]) * weightTensorGrid02[i];
+	}
+#else
+	tij[2] =  w * (Real(1)-static_cast<Real>(ref_dist[1]));
+	tij[3] =  w * static_cast<Real>(ref_dist[1]);
+#endif
+	
+	w = f * mass * (*part).vel[1] * (*part).vel[2] / e;
+#ifdef CIC_PROJECT_TIJ
+	for (int i = 0; i < 9; i++)
+	{
+		tij[i+36] = w * (Real(1)-static_cast<Real>(ref_dist[0])) * weightTensorGrid12[i];
+		tij[i+45] = w * static_cast<Real>(ref_dist[0]) * weightTensorGrid12[i];
+	}
+#else
+	tij[4] =  w * (Real(1)-static_cast<Real>(ref_dist[0]));
+	tij[5] =  w * static_cast<Real>(ref_dist[0]);
+#endif
+
+#ifdef __CUDA_ARCH__
+#ifdef CIC_PROJECT_TIJ
+	atomicAdd(&(*fields[0])(sites[0],0,1), tij[4]);
+	atomicAdd(&(*fields[0])(sites[0],0,2), tij[22]);
+	atomicAdd(&(*fields[0])(sites[0],1,2), tij[40]);
+	atomicAdd(&(*fields[0])(sites[0]-0-1,0,1), tij[0]);
+	atomicAdd(&(*fields[0])(sites[0]-0-1+2,0,1), tij[9]);
+	atomicAdd(&(*fields[0])(sites[0]-0+1,0,1), tij[6]);
+	atomicAdd(&(*fields[0])(sites[0]-0+1,0,2), tij[30]);
+	atomicAdd(&(*fields[0])(sites[0]-0,0,1), tij[3]);
+	atomicAdd(&(*fields[0])(sites[0]-0,0,2), tij[21]);
+	atomicAdd(&(*fields[0])(sites[0]-0-2,0,2), tij[18]);
+	atomicAdd(&(*fields[0])(sites[0]-0+1-2,0,2), tij[27]);
+	atomicAdd(&(*fields[0])(sites[0]-0+2,0,1), tij[12]);
+	atomicAdd(&(*fields[0])(sites[0]-0+2,0,2), tij[24]);
+	atomicAdd(&(*fields[0])(sites[0]-1,0,1), tij[1]);
+	atomicAdd(&(*fields[0])(sites[0]-1,1,2), tij[39]);
+	atomicAdd(&(*fields[0])(sites[0]-1-2,1,2), tij[36]);
+	atomicAdd(&(*fields[0])(sites[0]+0-1-2,1,2), tij[45]);
+	atomicAdd(&(*fields[0])(sites[0]+0-1,0,1), tij[2]);
+	atomicAdd(&(*fields[0])(sites[0]+0-1,1,2), tij[48]);
+	atomicAdd(&(*fields[0])(sites[0]-1+2,0,1), tij[10]);
+	atomicAdd(&(*fields[0])(sites[0]-1+2,1,2), tij[42]);
+	atomicAdd(&(*fields[0])(sites[0]-2,0,2), tij[19]);
+	atomicAdd(&(*fields[0])(sites[0]-2,1,2), tij[37]);
+	atomicAdd(&(*fields[0])(sites[0]+0-2,0,2), tij[20]);
+	atomicAdd(&(*fields[0])(sites[0]+0-2,1,2), tij[46]);
+	atomicAdd(&(*fields[0])(sites[0]+1-2,0,2), tij[28]);
+	atomicAdd(&(*fields[0])(sites[0]+1-2,1,2), tij[38]);
+	atomicAdd(&(*fields[0])(sites[0]+0+1-2,0,2), tij[29]);
+	atomicAdd(&(*fields[0])(sites[0]+0+1-2,1,2), tij[47]);
+	atomicAdd(&(*fields[0])(sites[0]+0-1+2,0,1), tij[11]);
+	atomicAdd(&(*fields[0])(sites[0]+0-1+2,1,2), tij[51]);
+	atomicAdd(&(*fields[0])(sites[0]-0+1+2,0,1), tij[15]);
+	atomicAdd(&(*fields[0])(sites[0]-0+1+2,0,2), tij[33]);
+	atomicAdd(&(*fields[0])(sites[0]+0,0,1), tij[5]);
+	atomicAdd(&(*fields[0])(sites[0]+0,0,2), tij[23]);
+	atomicAdd(&(*fields[0])(sites[0]+0,1,2), tij[49]);
+	atomicAdd(&(*fields[0])(sites[0]+1,0,1), tij[7]);
+	atomicAdd(&(*fields[0])(sites[0]+1,0,2), tij[31]);
+	atomicAdd(&(*fields[0])(sites[0]+1,1,2), tij[41]);
+	atomicAdd(&(*fields[0])(sites[0]+0+1,0,1), tij[8]);
+	atomicAdd(&(*fields[0])(sites[0]+0+1,0,2), tij[32]);
+	atomicAdd(&(*fields[0])(sites[0]+0+1,1,2), tij[50]);
+	atomicAdd(&(*fields[0])(sites[0]+2,0,1), tij[13]);
+	atomicAdd(&(*fields[0])(sites[0]+2,0,2), tij[25]);
+	atomicAdd(&(*fields[0])(sites[0]+2,1,2), tij[43]);
+	atomicAdd(&(*fields[0])(sites[0]+0+2,0,1), tij[14]);
+	atomicAdd(&(*fields[0])(sites[0]+0+2,0,2), tij[26]);
+	atomicAdd(&(*fields[0])(sites[0]+0+2,1,2), tij[52]);
+	atomicAdd(&(*fields[0])(sites[0]+1+2,0,1), tij[16]);
+	atomicAdd(&(*fields[0])(sites[0]+1+2,0,2), tij[34]);
+	atomicAdd(&(*fields[0])(sites[0]+1+2,1,2), tij[44]);
+	atomicAdd(&(*fields[0])(sites[0]+0+1+2,0,1), tij[17]);
+	atomicAdd(&(*fields[0])(sites[0]+0+1+2,0,2), tij[35]);
+	atomicAdd(&(*fields[0])(sites[0]+0+1+2,1,2), tij[53]);
+#else
+	atomicAdd(&(*fields[0])(sites[0],0,1), tij[0]);
+	atomicAdd(&(*fields[0])(sites[0],0,2), tij[2]);
+	atomicAdd(&(*fields[0])(sites[0],1,2), tij[4]);
+	atomicAdd(&(*fields[0])(sites[0]+0,1,2), tij[5]);
+	atomicAdd(&(*fields[0])(sites[0]+1,0,2), tij[3]);
+	atomicAdd(&(*fields[0])(sites[0]+2,0,1), tij[1]);
+#endif
+#else
+#ifdef CIC_PROJECT_TIJ
+	(*fields[0])(sites[0],0,1) += tij[4];
+	(*fields[0])(sites[0],0,2) += tij[22];
+	(*fields[0])(sites[0],1,2) += tij[40];
+	(*fields[0])(sites[0]-0-1,0,1) += tij[0];
+	(*fields[0])(sites[0]-0-1+2,0,1) += tij[9];
+	(*fields[0])(sites[0]-0+1,0,1) += tij[6];
+	(*fields[0])(sites[0]-0+1,0,2) += tij[30];
+	(*fields[0])(sites[0]-0,0,1) += tij[3];
+	(*fields[0])(sites[0]-0,0,2) += tij[21];
+	(*fields[0])(sites[0]-0-2,0,2) += tij[18];
+	(*fields[0])(sites[0]-0+1-2,0,2) += tij[27];
+	(*fields[0])(sites[0]-0+2,0,1) += tij[12];
+	(*fields[0])(sites[0]-0+2,0,2) += tij[24];
+	(*fields[0])(sites[0]-1,0,1) += tij[1];
+	(*fields[0])(sites[0]-1,1,2) += tij[39];
+	(*fields[0])(sites[0]-1-2,1,2) += tij[36];
+	(*fields[0])(sites[0]+0-1-2,1,2) += tij[45];
+	(*fields[0])(sites[0]+0-1,0,1) += tij[2];
+	(*fields[0])(sites[0]+0-1,1,2) += tij[48];
+	(*fields[0])(sites[0]-1+2,0,1) += tij[10];
+	(*fields[0])(sites[0]-1+2,1,2) += tij[42];
+	(*fields[0])(sites[0]-2,0,2) += tij[19];
+	(*fields[0])(sites[0]-2,1,2) += tij[37];
+	(*fields[0])(sites[0]+0-2,0,2) += tij[20];
+	(*fields[0])(sites[0]+0-2,1,2) += tij[46];
+	(*fields[0])(sites[0]+1-2,0,2) += tij[28];
+	(*fields[0])(sites[0]+1-2,1,2) += tij[38];
+	(*fields[0])(sites[0]+0+1-2,0,2) += tij[29];
+	(*fields[0])(sites[0]+0+1-2,1,2) += tij[47];
+	(*fields[0])(sites[0]+0-1+2,0,1) += tij[11];
+	(*fields[0])(sites[0]+0-1+2,1,2) += tij[51];
+	(*fields[0])(sites[0]-0+1+2,0,1) += tij[15];
+	(*fields[0])(sites[0]-0+1+2,0,2) += tij[33];
+	(*fields[0])(sites[0]+0,0,1) += tij[5];
+	(*fields[0])(sites[0]+0,0,2) += tij[23];
+	(*fields[0])(sites[0]+0,1,2) += tij[49];
+	(*fields[0])(sites[0]+1,0,1) += tij[7];
+	(*fields[0])(sites[0]+1,0,2) += tij[31];
+	(*fields[0])(sites[0]+1,1,2) += tij[41];
+	(*fields[0])(sites[0]+0+1,0,1) += tij[8];
+	(*fields[0])(sites[0]+0+1,0,2) += tij[32];
+	(*fields[0])(sites[0]+0+1,1,2) += tij[50];
+	(*fields[0])(sites[0]+2,0,1) += tij[13];
+	(*fields[0])(sites[0]+2,0,2) += tij[25];
+	(*fields[0])(sites[0]+2,1,2) += tij[43];
+	(*fields[0])(sites[0]+0+2,0,1) += tij[14];
+	(*fields[0])(sites[0]+0+2,0,2) += tij[26];
+	(*fields[0])(sites[0]+0+2,1,2) += tij[52];
+	(*fields[0])(sites[0]+1+2,0,1) += tij[16];
+	(*fields[0])(sites[0]+1+2,0,2) += tij[34];
+	(*fields[0])(sites[0]+1+2,1,2) += tij[44];
+	(*fields[0])(sites[0]+0+1+2,0,1) += tij[17];
+	(*fields[0])(sites[0]+0+1+2,0,2) += tij[35];
+	(*fields[0])(sites[0]+0+1+2,1,2) += tij[53];
+#else
+	(*fields[0])(sites[0],0,1) += tij[0];
+	(*fields[0])(sites[0],0,2) += tij[2];
+	(*fields[0])(sites[0],1,2) += tij[4];	
+	(*fields[0])(sites[0]+0,1,2) += tij[5];
+	(*fields[0])(sites[0]+1,0,2) += tij[3];
+	(*fields[0])(sites[0]+2,0,1) += tij[1];
+#endif
+#endif
+}
+
+// callable struct for particle_Tij_project
+
+struct particle_Tij_project_functor
+{
+	__host__ __device__ void operator()(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+	{
+		particle_Tij_project(dtau, dx, part, ref_dist, partInfo, fields, sites, nfield, params, outputs, noutputs);
+	}
+};
+
+
 //////////////////////////
-// projection_Ti0_project
+// projection_Tij_project (2)
+//////////////////////////
+// Description:
+//   Particle-mesh projection for Tij, including geometric corrections
+// 
+// Arguments:
+//   pcls       pointer to particle handler
+//   Tij        pointer to target field
+//   a          scale factor at projection (needed in order to convert
+//              canonical momenta to energies)
+//   phi        pointer to Bardeen potential which characterizes the
+//              geometric corrections (volume distortion); can be set to
+//              NULL which will result in no corrections applied
+//   coeff      coefficient applied to the projection operation (default 1)
+//   hij_hom    pointer to the homogeneous part of the spatial metric (default NULL)
+//
+// Returns:
+// 
+//////////////////////////
+
+void projection_Tij_project(perfParticles<part_simple, part_simple_info> * pcls, Field<Real> * Tij, double a = 1., Field<Real> * phi = nullptr, double coeff = 1., Real * hij_hom = nullptr)
+{
+	Field<Real> * fields[2];
+	fields[0] = Tij;
+	fields[1] = phi;
+
+	double params[7];
+	params[0] = a;
+	params[1] = coeff;
+
+	if (hij_hom != nullptr)
+	{
+		params[2] = hij_hom[0];
+		params[3] = hij_hom[1];
+		params[4] = hij_hom[2];
+		params[5] = hij_hom[3];
+		params[6] = hij_hom[4];
+	}
+	else
+	{
+		params[2] = 0.;
+		params[3] = 0.;
+		params[4] = 0.;
+		params[5] = 0.;
+		params[6] = 0.;
+	}
+
+	pcls->projectParticles(particle_Tij_project_functor(), fields, (phi == nullptr ? 1 : 2), params);
+}
+
+
+//////////////////////////
+// projection_Ti0_project (1)
 //////////////////////////
 // Description:
 //   Particle-mesh projection for Ti0, including geometric corrections
@@ -1770,6 +2434,123 @@ void projection_Ti0_project(Particles<part, part_info, part_dataType> * pcls, Fi
             }
 		}
 	}
+}
+
+
+__host__ __device__ void particle_Ti0_project(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+{
+	Real mass = partInfo.mass * (*params) / (dx*dx*dx);
+
+	Real localCubeWeights[8] = {Real(1), Real(1), Real(1), Real(1), Real(1), Real(1), Real(1), Real(1)};
+
+	if (nfield > 1)
+	{
+		localCubeWeights[0] += Real(6) * (*fields[1])(sites[1]);
+		localCubeWeights[1] += Real(6) * (*fields[1])(sites[1]+2);
+		localCubeWeights[2] += Real(6) * (*fields[1])(sites[1]+1);
+		localCubeWeights[3] += Real(6) * (*fields[1])(sites[1]+1+2);
+		localCubeWeights[4] += Real(6) * (*fields[1])(sites[1]+0);
+		localCubeWeights[5] += Real(6) * (*fields[1])(sites[1]+0+2);
+		localCubeWeights[6] += Real(6) * (*fields[1])(sites[1]+0+1);
+		localCubeWeights[7] += Real(6) * (*fields[1])(sites[1]+0+1+2);
+	}
+
+	if (nfield > 2)
+	{
+		localCubeWeights[0] -= (*fields[2])(sites[2]);
+		localCubeWeights[1] -= (*fields[2])(sites[2]+2);
+		localCubeWeights[2] -= (*fields[2])(sites[2]+1);
+		localCubeWeights[3] -= (*fields[2])(sites[2]+1+2);
+		localCubeWeights[4] -= (*fields[2])(sites[2]+0);
+		localCubeWeights[5] -= (*fields[2])(sites[2]+0+2);
+		localCubeWeights[6] -= (*fields[2])(sites[2]+0+1);
+		localCubeWeights[7] -= (*fields[2])(sites[2]+0+1+2);
+	}
+
+	localCubeWeights[0] *= (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass;
+	localCubeWeights[1] *= (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * mass;
+	localCubeWeights[2] *= (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass;
+	localCubeWeights[3] *= (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * mass;
+	localCubeWeights[4] *= static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass;
+	localCubeWeights[5] *= static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * mass;
+	localCubeWeights[6] *= static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass;
+	localCubeWeights[7] *= static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * mass;
+
+	#ifdef __CUDA_ARCH__
+	for (int i = 0; i < 3; i++)
+	{
+		atomicAdd(&(*fields[0])(sites[0],i)       , localCubeWeights[0] * (*part).vel[i]);
+		atomicAdd(&(*fields[0])(sites[0]+2,i)     , localCubeWeights[1] * (*part).vel[i]);
+		atomicAdd(&(*fields[0])(sites[0]+1,i)     , localCubeWeights[2] * (*part).vel[i]);
+		atomicAdd(&(*fields[0])(sites[0]+1+2,i)   , localCubeWeights[3] * (*part).vel[i]);
+		atomicAdd(&(*fields[0])(sites[0]+0,i)     , localCubeWeights[4] * (*part).vel[i]);
+		atomicAdd(&(*fields[0])(sites[0]+0+2,i)   , localCubeWeights[5] * (*part).vel[i]);
+		atomicAdd(&(*fields[0])(sites[0]+0+1,i)   , localCubeWeights[6] * (*part).vel[i]);
+		atomicAdd(&(*fields[0])(sites[0]+0+1+2,i) , localCubeWeights[7] * (*part).vel[i]);
+	}
+	#else
+	for (int i = 0; i < 3; i++)
+	{
+		(*fields[0])(sites[0],i)       += localCubeWeights[0] * (*part).vel[i];
+		(*fields[0])(sites[0]+2,i)     += localCubeWeights[1] * (*part).vel[i];
+		(*fields[0])(sites[0]+1,i)     += localCubeWeights[2] * (*part).vel[i];
+		(*fields[0])(sites[0]+1+2,i)   += localCubeWeights[3] * (*part).vel[i];
+		(*fields[0])(sites[0]+0,i)     += localCubeWeights[4] * (*part).vel[i];
+		(*fields[0])(sites[0]+0+2,i)   += localCubeWeights[5] * (*part).vel[i];
+		(*fields[0])(sites[0]+0+1,i)   += localCubeWeights[6] * (*part).vel[i];
+		(*fields[0])(sites[0]+0+1+2,i) += localCubeWeights[7] * (*part).vel[i];
+	}
+	#endif
+}
+
+// callable struct for particle_Ti0_project
+
+struct particle_Ti0_project_functor
+{
+	__host__ __device__ void operator()(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+	{
+		particle_Ti0_project(dtau, dx, part, ref_dist, partInfo, fields, sites, nfield, params, outputs, noutputs);
+	}
+};
+
+
+//////////////////////////
+// projection_Ti0_project (2)
+//////////////////////////
+// Description:
+//   Particle-mesh projection for Ti0, including geometric corrections
+//
+// Arguments:
+//   pcls       pointer to particle handler
+//   Ti0        pointer to target field
+//   phi        pointer to Bardeen potential which characterizes the
+//              geometric corrections (volume distortion); can be set to
+//              NULL which will result in no corrections applied
+//   chi        pointer to difference between the Bardeen potentials which
+//              characterizes additional corrections; can be set to
+//              NULL which will result in no corrections applied
+//   coeff      coefficient applied to the projection operation (default 1)
+//
+// Returns:
+//
+//////////////////////////
+
+void projection_Ti0_project(perfParticles<part_simple, part_simple_info> * pcls, Field<Real> * Ti0, Field<Real> * phi = nullptr, Field<Real> * chi = nullptr, double coeff = 1.)
+{
+	Field<Real> * fields[3];
+	fields[0] = Ti0;
+	fields[1] = phi;
+	fields[2] = chi;
+
+	int nfield = 1;
+
+	if (phi != nullptr)
+	{
+		nfield++;
+		if (chi != nullptr) nfield++;
+	}
+
+	pcls->projectParticles(particle_Ti0_project_functor(), fields, nfield, &coeff);
 }
 
 

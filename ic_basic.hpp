@@ -1442,34 +1442,32 @@ void generateDisplacementField(Field<Cplx> & potFT, const Real coeff, const gsl_
 // 
 //////////////////////////
 
-void initializeParticlePositions(const long numpart, const float * partdata, const int numtile, Particles<part_simple,part_simple_info,part_simple_dataType> & pcls)
-{
-	long xtile, ytile, ztile, i;
-	Site p(pcls.lattice());
-	
+template <typename part_handler>
+void initializeParticlePositions(const long numpart, const float * partdata, const int numtile, part_handler & pcls)
+{	
 	part_simple part;
 	
-	part.vel[0] = 0.;
-	part.vel[1] = 0.;
-	part.vel[2] = 0.;
+	part.vel[0] = Real(0);
+	part.vel[1] = Real(0);
+	part.vel[2] = Real(0);
 	
-	for (ztile = (pcls.lattice().coordSkip()[0] * numtile) / pcls.lattice().size(2); ztile <= ((pcls.lattice().coordSkip()[0] + pcls.lattice().sizeLocal(2)) * numtile) / pcls.lattice().size(2); ztile++)
+	for (int ztile = (pcls.lattice().coordSkip()[0] * numtile) / pcls.lattice().size(2); ztile <= ((pcls.lattice().coordSkip()[0] + pcls.lattice().sizeLocal(2)) * numtile) / pcls.lattice().size(2); ztile++)
 	{
 		if (ztile >= numtile) break;
 		
-		for (ytile = (pcls.lattice().coordSkip()[1] * numtile) / pcls.lattice().size(1); ytile <= ((pcls.lattice().coordSkip()[1] + pcls.lattice().sizeLocal(1)) * numtile) / pcls.lattice().size(1); ytile++)
+		for (int ytile = (pcls.lattice().coordSkip()[1] * numtile) / pcls.lattice().size(1); ytile <= ((pcls.lattice().coordSkip()[1] + pcls.lattice().sizeLocal(1)) * numtile) / pcls.lattice().size(1); ytile++)
 		{
 			if (ytile >= numtile) break;
 			
-			for (xtile = 0; xtile < numtile; xtile++)
+			for (int xtile = 0; xtile < numtile; xtile++)
 			{
-				for (i = 0; i < numpart; i++)
+				for (int i = 0; i < numpart; i++)
 				{
 					part.pos[0] = ((Real) xtile + partdata[3*i]) / (Real) numtile;
 					part.pos[1] = ((Real) ytile + partdata[3*i+1]) / (Real) numtile;
 					part.pos[2] = ((Real) ztile + partdata[3*i+2]) / (Real) numtile;
 					
-					part.ID = i + numpart * (xtile + (long) numtile * (ytile + (long) numtile * ztile));
+					part.ID = (long) i + (long) numpart * ((long) xtile + (long) numtile * ((long) ytile + (long) numtile * (long) ztile));
 					
 					pcls.addParticle_global(part);
 				}

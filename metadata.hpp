@@ -127,6 +127,10 @@
 #define GADGET_ID_BYTES 8
 #endif
 
+#ifndef PCL_EXTRA_CAPACITY
+#define PCL_EXTRA_CAPACITY 65536        // extra capacity for particle handler
+#endif
+
 #ifdef EXTERNAL_IO
 #ifndef NUMBER_OF_IO_FILES
 #define NUMBER_OF_IO_FILES 4

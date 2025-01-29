@@ -6,7 +6,7 @@
 //
 // Author: Julian Adamek (Université de Genève & Observatoire de Paris & Queen Mary University of London & Universität Zürich)
 //
-// Last modified: December 2024
+// Last modified: January 2025
 //
 //////////////////////////
 
@@ -56,7 +56,7 @@
 // 
 //////////////////////////
 
-void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fourpiG, double & a, double & tau, double & dtau, double & dtau_old, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_cdm, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_b, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_ncdm, double * maxvel, Field<Real> * phi, Field<Real> * chi, Field<Real> * Bi, Field<Real> * source, Field<Real> * Sij, Field<Cplx> * zetaFT, Field<Cplx> * scalarFT, Field<Cplx> * BiFT, Field<Cplx> * SijFT, PlanFFT<Cplx> * plan_phi, PlanFFT<Cplx> * plan_chi, PlanFFT<Cplx> * plan_Bi, PlanFFT<Cplx> * plan_source, PlanFFT<Cplx> * plan_Sij, int & cycle, int & snapcount, int & pkcount, int & restartcount, set<long> ** IDbacklog)
+void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fourpiG, double & a, double & tau, double & dtau, double & dtau_old, perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles_gevolution<part_simple,part_simple_info> * pcls_b, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_ncdm, double * maxvel, Field<Real> * phi, Field<Real> * chi, Field<Real> * Bi, Field<Real> * source, Field<Real> * Sij, Field<Cplx> * zetaFT, Field<Cplx> * scalarFT, Field<Cplx> * BiFT, Field<Cplx> * SijFT, PlanFFT<Cplx> * plan_phi, PlanFFT<Cplx> * plan_chi, PlanFFT<Cplx> * plan_Bi, PlanFFT<Cplx> * plan_source, PlanFFT<Cplx> * plan_Sij, int & cycle, int & snapcount, int & pkcount, int & restartcount, set<long> ** IDbacklog)
 {
 	part_simple_info pcls_cdm_info;
 	part_simple_dataType pcls_cdm_dataType;
@@ -101,11 +101,12 @@ void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fou
 	pcls_cdm_info.mass = 0.;
 	pcls_cdm_info.relativistic = false;
 	
-	pcls_cdm->initialize(pcls_cdm_info, pcls_cdm_dataType, &(phi->lattice()), boxSize);
+	//pcls_cdm->initialize(pcls_cdm_info, pcls_cdm_dataType, &(phi->lattice()), boxSize);
+	pcls_cdm->initialize(pcls_cdm_info, &(phi->lattice()), boxSize, PCL_EXTRA_CAPACITY, PCL_EXTRA_CAPACITY);
 	
 	if ((ext = strstr(ic.pclfile[0], ".h5")) != NULL)
 	{
-		filename.assign(ic.pclfile[0], ext-ic.pclfile[0]);
+		/*filename.assign(ic.pclfile[0], ext-ic.pclfile[0]);
 		get_fileDsc_global(filename + ".h5", fd);
 		numpcl = (long *) malloc(fd.numProcPerFile * sizeof(long));
 		dummy1 = (Real *) malloc(3 * fd.numProcPerFile * sizeof(Real));
@@ -116,7 +117,8 @@ void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fou
 		pcls_cdm->loadHDF5(filename, 1);
 		free(numpcl);
 		free(dummy1);
-		free(dummy2);
+		free(dummy2);*/
+		COUT << " error: HDF5 input not supported for CDM particles!" << endl;
 	}
 	else
 	{
@@ -149,7 +151,7 @@ void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fou
 	}
 	
 	COUT << " " << sim.numpcl[0] << " cdm particles read successfully." << endl;
-	maxvel[0] = pcls_cdm->updateVel(update_q, 0., &phi, 1, f_params);
+	maxvel[0] = pcls_cdm->updateVel(update_q_functor(), 0., &phi, 1, f_params);
 	
 	if (sim.baryon_flag == 1)
 	{
@@ -157,11 +159,12 @@ void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fou
 		pcls_b_info.mass = 0.;
 		pcls_b_info.relativistic = false;
 	
-		pcls_b->initialize(pcls_b_info, pcls_b_dataType, &(phi->lattice()), boxSize);
+		//pcls_b->initialize(pcls_b_info, pcls_b_dataType, &(phi->lattice()), boxSize);
+		pcls_b->initialize(pcls_b_info, &(phi->lattice()), boxSize, PCL_EXTRA_CAPACITY, PCL_EXTRA_CAPACITY);
 		
 		if ((ext = strstr(ic.pclfile[1], ".h5")) != NULL)
 		{
-			filename.assign(ic.pclfile[1], ext-ic.pclfile[1]);
+			/*filename.assign(ic.pclfile[1], ext-ic.pclfile[1]);
 			get_fileDsc_global(filename + ".h5", fd);
 			numpcl = (long *) malloc(fd.numProcPerFile * sizeof(long));
 			dummy1 = (Real *) malloc(3 * fd.numProcPerFile * sizeof(Real));
@@ -172,7 +175,8 @@ void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fou
 			pcls_b->loadHDF5(filename, 1);
 			free(numpcl);
 			free(dummy1);
-			free(dummy2);
+			free(dummy2);*/
+			COUT << " error: HDF5 input not supported for baryon particles!" << endl;
 		}
 		else
 		{
@@ -202,7 +206,7 @@ void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fou
 		}
 		
 		COUT << " " << sim.numpcl[1] << " baryon particles read successfully." << endl;
-		maxvel[1] = pcls_b->updateVel(update_q, 0., &phi, 1, f_params);
+		maxvel[1] = pcls_b->updateVel(update_q_functor(), 0., &phi, 1, f_params);
 	}
 	else
 		sim.baryon_flag = 0;
@@ -276,7 +280,7 @@ void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fou
 		projection_init(source);
 		scalarProjectionCIC_project(pcls_cdm, source);
 		if (sim.baryon_flag)
-			scalarProjectionCIC_project(pcls_b, source);
+			scalarProjectionCIC_project(pcls_b, source);	
 		scalarProjectionCIC_comm(source);
 	
 		plan_source->execute(FFT_FORWARD);
@@ -566,19 +570,21 @@ void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fou
 					
 					if (p == 0)
 					{
-						for (xPart.first(); xPart.test(); xPart.next())
+						/*for (xPart.first(); xPart.test(); xPart.next())
 						{
 							for (auto it = (pcls_cdm->field())(xPart).parts.begin(); it != (pcls_cdm->field())(xPart).parts.end(); ++it)
 								IDlookup[sim.IDlog_mapping[i]].insert((*it).ID);
-						}
+						}*/
+						// FIXME: collect IDs from all particles in the lightcone
 					}
 					else if (p == 1 && sim.baryon_flag > 0)
 					{
-						for (xPart.first(); xPart.test(); xPart.next())
+						/*for (xPart.first(); xPart.test(); xPart.next())
 						{
 							for (auto it = (pcls_b->field())(xPart).parts.begin(); it != (pcls_b->field())(xPart).parts.end(); ++it)
 								IDlookup[sim.IDlog_mapping[i]].insert((*it).ID);
-						}
+						}*/
+						// FIXME: collect IDs from all particles in the lightcone
 					}
 					else
 					{

@@ -60,7 +60,7 @@ using namespace LATfield2;
 // 
 //////////////////////////
 
-void displace_pcls_ic_basic(double coeff, double lat_resolution, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> ** fields, Site * sites, int nfield, double * params, double * outputs, int noutputs)
+__host__ __device__ void displace_pcls_ic_basic(double coeff, double lat_resolution, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> ** fields, Site * sites, int nfield, double * params, double * outputs, int noutputs)
 {
 	int i;
 	Real gradxi[3] = {0, 0, 0};
@@ -93,6 +93,16 @@ void displace_pcls_ic_basic(double coeff, double lat_resolution, part_simple * p
 	for (i = 0; i < 3; i++) (*part).pos[i] += coeff*gradxi[i];
 }
 
+// callable struct for displace_pcls_ic_basic
+
+struct displace_pcls_ic_basic_functor
+{	
+	__host__ __device__ void operator()(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+	{
+		displace_pcls_ic_basic(dtau, dx, part, ref_dist, partInfo, fields, sites, nfield, params, outputs, noutputs);
+	}
+};
+
 
 //////////////////////////
 // initialize_q_ic_basic
@@ -118,7 +128,7 @@ void displace_pcls_ic_basic(double coeff, double lat_resolution, part_simple * p
 // 
 //////////////////////////
 
-Real initialize_q_ic_basic(double coeff, double lat_resolution, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> ** fields, Site * sites, int nfield, double * params, double * outputs, int noutputs)
+__host__ __device__ Real initialize_q_ic_basic(double coeff, double lat_resolution, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> ** fields, Site * sites, int nfield, double * params, double * outputs, int noutputs)
 {
 	int i;
 	Real gradPhi[3] = {0, 0, 0};
@@ -154,6 +164,16 @@ Real initialize_q_ic_basic(double coeff, double lat_resolution, part_simple * pa
 	
 	return v2;
 }
+
+// callable struct for initialize_q_ic_basic
+
+struct initialize_q_ic_basic_functor
+{	
+	__host__ __device__ Real operator()(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
+	{
+		return initialize_q_ic_basic(dtau, dx, part, ref_dist, partInfo, fields, sites, nfield, params, outputs, noutputs);
+	}
+};
 
 
 //////////////////////////
@@ -1588,7 +1608,7 @@ double applyMomentumDistribution(Particles<part_simple,part_simple_info,part_sim
 				if (f[i] + (f[i+1]-f[i]) * ((float) prng() / (float) sitmo::prng_engine::max()) < q * q / (exp(q) + 1.0f)) break;
 			}
 				
-			r1 = acos(2. * ((float) prng() / (float) sitmo::prng_engine::max()) - 1.);
+			r1 = 2 * ((float) prng() / (float) sitmo::prng_engine::max()) - 1;
 			r2 = 2 * M_PI * ((float) prng() / (float) sitmo::prng_engine::max());
 				
 			if (delta != NULL)
@@ -1610,9 +1630,9 @@ double applyMomentumDistribution(Particles<part_simple,part_simple_info,part_sim
 			else
 				q *= T_m;
 				
-			(*it).vel[0] += cos(r2) * sin(r1) * q;
-			(*it).vel[1] += sin(r2) * sin(r1) * q;
-			(*it).vel[2] += cos(r1) * q;
+			(*it).vel[0] += cos(r2) * sqrt(1 - r1*r1) * q;
+			(*it).vel[1] += sin(r2) * sqrt(1 - r1*r1) * q;
+			(*it).vel[2] += r1 * q;
 			
 			sum_q += q;
 		}
@@ -1664,7 +1684,7 @@ double applyMomentumDistribution(Particles<part_simple,part_simple_info,part_sim
 // 
 //////////////////////////
 
-void generateIC_basic(metadata & sim, icsettings & ic, cosmology & cosmo, const double fourpiG, Particles<part_simple,part_simple_info,part_simple_dataType> * pcls_cdm, Particles<part_simple,part_simple_info,part_simple_dataType> * pcls_b, Particles<part_simple,part_simple_info,part_simple_dataType> * pcls_ncdm, double * maxvel, Field<Real> * phi, Field<Real> * chi, Field<Real> * Bi, Field<Real> * source, Field<Real> * Sij, Field<Cplx> * scalarFT, Field<Cplx> * BiFT, Field<Cplx> * SijFT, PlanFFT<Cplx> * plan_phi, PlanFFT<Cplx> * plan_chi, PlanFFT<Cplx> * plan_Bi, PlanFFT<Cplx> * plan_source, PlanFFT<Cplx> * plan_Sij,
+void generateIC_basic(metadata & sim, icsettings & ic, cosmology & cosmo, const double fourpiG, perfParticles<part_simple,part_simple_info> * pcls_cdm, perfParticles<part_simple,part_simple_info> * pcls_b, Particles<part_simple,part_simple_info,part_simple_dataType> * pcls_ncdm, double * maxvel, Field<Real> * phi, Field<Real> * chi, Field<Real> * Bi, Field<Real> * source, Field<Real> * Sij, Field<Cplx> * scalarFT, Field<Cplx> * BiFT, Field<Cplx> * SijFT, PlanFFT<Cplx> * plan_phi, PlanFFT<Cplx> * plan_chi, PlanFFT<Cplx> * plan_Bi, PlanFFT<Cplx> * plan_source, PlanFFT<Cplx> * plan_Sij,
 #ifdef HAVE_CLASS
 background & class_background, perturbs & class_perturbs,
 #endif
@@ -2007,15 +2027,20 @@ parameter * params, int & numparam)
 	else
 		pcls_cdm_info.mass = (cosmo.Omega_cdm + cosmo.Omega_b) / (Real) (sim.numpcl[0]*(long)ic.numtile[0]*(long)ic.numtile[0]*(long)ic.numtile[0]);
 	pcls_cdm_info.relativistic = false;
+
+	uint64_t capacity = (16L * sim.numpcl[0] * (long) ic.numtile[0] * (long) ic.numtile[0] * (long) ic.numtile[0]) / (parallel.size() * 15L);
 	
-	pcls_cdm->initialize(pcls_cdm_info, pcls_cdm_dataType, &(phi->lattice()), boxSize);
+	//pcls_cdm->initialize(pcls_cdm_info, pcls_cdm_dataType, &(phi->lattice()), boxSize);
+	pcls_cdm->initialize(pcls_cdm_info, &(phi->lattice()), boxSize, capacity+PCL_EXTRA_CAPACITY, PCL_EXTRA_CAPACITY);
 	
 	initializeParticlePositions(sim.numpcl[0], pcldata, ic.numtile[0], *pcls_cdm);
+	pcls_cdm->updateRowBuffers();
+
 	i = MAX;
 	if (sim.baryon_flag == 3)	// baryon treatment = hybrid; displace particles using both displacement fields
-		pcls_cdm->moveParticles(displace_pcls_ic_basic, 1., ic_fields, 2, NULL, &max_displacement, &i, 1);
+		pcls_cdm->moveParticles(displace_pcls_ic_basic_functor(), 1., ic_fields, 2, NULL, &max_displacement, &i, 1);
 	else
-		pcls_cdm->moveParticles(displace_pcls_ic_basic, 1., &chi, 1, NULL, &max_displacement, &i, 1);	// displace CDM particles
+		pcls_cdm->moveParticles(displace_pcls_ic_basic_functor(), 1., &chi, 1, NULL, &max_displacement, &i, 1);	// displace CDM particles
 	
 	sim.numpcl[0] *= (long) ic.numtile[0] * (long) ic.numtile[0] * (long) ic.numtile[0];
 	
@@ -2046,12 +2071,17 @@ parameter * params, int & numparam)
 		strcpy(pcls_b_info.type_name, "part_simple");
 		pcls_b_info.mass = cosmo.Omega_b / (Real) (sim.numpcl[1]*(long)ic.numtile[1]*(long)ic.numtile[1]*(long)ic.numtile[1]);
 		pcls_b_info.relativistic = false;
+
+		capacity = (16L * sim.numpcl[1] * (long) ic.numtile[1] * (long) ic.numtile[1] * (long) ic.numtile[1]) / (parallel.size() * 15L);
 	
-		pcls_b->initialize(pcls_b_info, pcls_b_dataType, &(phi->lattice()), boxSize);
+		//pcls_b->initialize(pcls_b_info, pcls_b_dataType, &(phi->lattice()), boxSize);
+		pcls_b->initialize(pcls_b_info, &(phi->lattice()), boxSize, capacity+PCL_EXTRA_CAPACITY, PCL_EXTRA_CAPACITY);
 	
 		initializeParticlePositions(sim.numpcl[1], pcldata, ic.numtile[1], *pcls_b);
+		pcls_b->updateRowBuffers();
+
 		i = MAX;
-		pcls_b->moveParticles(displace_pcls_ic_basic, 1., &phi, 1, NULL, &max_displacement, &i, 1);	// displace baryon particles
+		pcls_b->moveParticles(displace_pcls_ic_basic_functor(), 1., &phi, 1, NULL, &max_displacement, &i, 1);	// displace baryon particles
 	
 		sim.numpcl[1] *= (long) ic.numtile[1] * (long) ic.numtile[1] * (long) ic.numtile[1];
 	
@@ -2082,12 +2112,12 @@ parameter * params, int & numparam)
 		gsl_spline_free(tk_t1);			
 		
 		if (sim.baryon_flag == 3)	// baryon treatment = hybrid; set velocities using both velocity potentials
-			maxvel[0] = pcls_cdm->updateVel(initialize_q_ic_basic, 1., ic_fields, 2) / a;
+			maxvel[0] = pcls_cdm->updateVel(initialize_q_ic_basic_functor(), 1., ic_fields, 2) / a;
 		else
-			maxvel[0] = pcls_cdm->updateVel(initialize_q_ic_basic, 1., &chi, 1) / a;	// set CDM velocities
+			maxvel[0] = pcls_cdm->updateVel(initialize_q_ic_basic_functor(), 1., &chi, 1) / a;	// set CDM velocities
 		
 		if (sim.baryon_flag == 1)
-			maxvel[1] = pcls_b->updateVel(initialize_q_ic_basic, 1., &phi, 1) / a;	// set baryon velocities
+			maxvel[1] = pcls_b->updateVel(initialize_q_ic_basic_functor(), 1., &phi, 1) / a;	// set baryon velocities
 	}
 	
 	if (sim.baryon_flag > 1) sim.baryon_flag = 0;
@@ -2219,9 +2249,9 @@ parameter * params, int & numparam)
 	if (ic.pkfile[0] != '\0')	// if power spectrum is used instead of transfer functions, set velocities using linear approximation
 	{	
 		rescale = a / Hconf(a, fourpiG, cosmo) / (1.5 * Omega_m(a, cosmo) + 2. * Omega_rad(a, cosmo));
-		maxvel[0] = pcls_cdm->updateVel(initialize_q_ic_basic, rescale, &phi, 1) / a;
+		maxvel[0] = pcls_cdm->updateVel(initialize_q_ic_basic_functor(), rescale, &phi, 1) / a;
 		if (sim.baryon_flag)
-			maxvel[1] = pcls_b->updateVel(initialize_q_ic_basic, rescale, &phi, 1) / a;
+			maxvel[1] = pcls_b->updateVel(initialize_q_ic_basic_functor(), rescale, &phi, 1) / a;
 	}
 			
 	for (p = 0; p < cosmo.num_ncdm; p++)

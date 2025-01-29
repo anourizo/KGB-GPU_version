@@ -1340,6 +1340,12 @@ void projection_T00_project(perfParticles<part_simple, part_simple_info> * pcls,
 }
 
 
+void scalarProjectionCIC_project(perfParticles<part_simple, part_simple_info> * pcls, Field<Real> * field)
+{
+	pcls->meshprojection_project(field);
+}
+
+
 //////////////////////////
 // projection_T0i_project (1)
 //////////////////////////

@@ -1,5 +1,5 @@
 //////////////////////////
-// Copyright (c) 2015-2024 Julian Adamek
+// Copyright (c) 2015-2025 Julian Adamek
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -247,8 +247,8 @@ int main(int argc, char **argv)
 	Lattice latFT;
 	latFT.initializeRealFFT(lat,0);
 	
-	Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> pcls_cdm;
-	Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> pcls_b;
+	perfParticles_gevolution<part_simple,part_simple_info> pcls_cdm;
+	perfParticles_gevolution<part_simple,part_simple_info> pcls_b;
 	Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> pcls_ncdm[MAX_PCL_SPECIES-2];
 	Field<Real> * update_cdm_fields[3];
 	Field<Real> * update_b_fields[3];
@@ -966,15 +966,15 @@ int main(int argc, char **argv)
 		f_params[1] = a * a * sim.numpts;
 		if (sim.gr_flag > 0)
 		{
-			maxvel[0] = pcls_cdm.updateVel(update_q, (dtau + dtau_old) / 2., update_cdm_fields, (1. / a < ic.z_relax + 1. ? 3 : 2), f_params);
+			maxvel[0] = pcls_cdm.updateVel(update_q_functor(), (dtau + dtau_old) / 2., update_cdm_fields, (1. / a < ic.z_relax + 1. ? 3 : 2), f_params);
 			if (sim.baryon_flag)
-				maxvel[1] = pcls_b.updateVel(update_q, (dtau + dtau_old) / 2., update_b_fields, (1. / a < ic.z_relax + 1. ? 3 : 2), f_params);
+				maxvel[1] = pcls_b.updateVel(update_q_functor(), (dtau + dtau_old) / 2., update_b_fields, (1. / a < ic.z_relax + 1. ? 3 : 2), f_params);
 		}
 		else
 		{
-			maxvel[0] = pcls_cdm.updateVel(update_q_Newton, (dtau + dtau_old) / 2., update_cdm_fields, ((sim.radiation_flag + sim.fluid_flag > 0 && a < 1. / (sim.z_switch_linearchi + 1.)) ? 2 : 1), f_params);
+			maxvel[0] = pcls_cdm.updateVel(update_q_Newton_functor(), (dtau + dtau_old) / 2., update_cdm_fields, ((sim.radiation_flag + sim.fluid_flag > 0 && a < 1. / (sim.z_switch_linearchi + 1.)) ? 2 : 1), f_params);
 			if (sim.baryon_flag)
-				maxvel[1] = pcls_b.updateVel(update_q_Newton, (dtau + dtau_old) / 2., update_b_fields, ((sim.radiation_flag + sim.fluid_flag > 0 && a < 1. / (sim.z_switch_linearchi + 1.)) ? 2 : 1), f_params);
+				maxvel[1] = pcls_b.updateVel(update_q_Newton_functor(), (dtau + dtau_old) / 2., update_b_fields, ((sim.radiation_flag + sim.fluid_flag > 0 && a < 1. / (sim.z_switch_linearchi + 1.)) ? 2 : 1), f_params);
 		}
 
 #ifdef BENCHMARK
@@ -989,15 +989,15 @@ int main(int argc, char **argv)
 		f_params[1] = a * a * sim.numpts;
 		if (sim.gr_flag > 0)
 		{
-			pcls_cdm.moveParticles(update_pos, dtau, update_cdm_fields, (1. / a < ic.z_relax + 1. ? 3 : 0), f_params);
+			pcls_cdm.moveParticles(update_pos_functor(), dtau, update_cdm_fields, (1. / a < ic.z_relax + 1. ? 3 : 0), f_params);
 			if (sim.baryon_flag)
-				pcls_b.moveParticles(update_pos, dtau, update_b_fields, (1. / a < ic.z_relax + 1. ? 3 : 0), f_params);
+				pcls_b.moveParticles(update_pos_functor(), dtau, update_b_fields, (1. / a < ic.z_relax + 1. ? 3 : 0), f_params);
 		}
 		else
 		{
-			pcls_cdm.moveParticles(update_pos_Newton, dtau, NULL, 0, f_params);
+			pcls_cdm.moveParticles(update_pos_Newton_functor(), dtau, NULL, 0, f_params);
 			if (sim.baryon_flag)
-				pcls_b.moveParticles(update_pos_Newton, dtau, NULL, 0, f_params);
+				pcls_b.moveParticles(update_pos_Newton_functor(), dtau, NULL, 0, f_params);
 		}
 
 #ifdef BENCHMARK
@@ -1032,11 +1032,11 @@ int main(int argc, char **argv)
 				if (sim.vector_flag == VECTOR_ELLIPTIC)
 				{
 					plan_Bi_check.execute(FFT_BACKWARD);
-					hibernate(sim, ic, cosmo, &pcls_cdm, &pcls_b, pcls_ncdm, phi, chi, Bi_check, a, tau, dtau, cycle);
+					//hibernate(sim, ic, cosmo, &pcls_cdm, &pcls_b, pcls_ncdm, phi, chi, Bi_check, a, tau, dtau, cycle); // FIXME
 				}
 				else
 #endif
-				hibernate(sim, ic, cosmo, &pcls_cdm, &pcls_b, pcls_ncdm, phi, chi, Bi, a, tau, dtau, cycle);
+				//hibernate(sim, ic, cosmo, &pcls_cdm, &pcls_b, pcls_ncdm, phi, chi, Bi, a, tau, dtau, cycle); // FIXME
 				break;
 			}
 		}
@@ -1050,11 +1050,11 @@ int main(int argc, char **argv)
 			if (sim.vector_flag == VECTOR_ELLIPTIC)
 			{
 				plan_Bi_check.execute(FFT_BACKWARD);
-				hibernate(sim, ic, cosmo, &pcls_cdm, &pcls_b, pcls_ncdm, phi, chi, Bi_check, a, tau, dtau, cycle, restartcount);
+				//hibernate(sim, ic, cosmo, &pcls_cdm, &pcls_b, pcls_ncdm, phi, chi, Bi_check, a, tau, dtau, cycle, restartcount);  // FIXME
 			}
 			else
 #endif
-			hibernate(sim, ic, cosmo, &pcls_cdm, &pcls_b, pcls_ncdm, phi, chi, Bi, a, tau, dtau, cycle, restartcount);
+			//hibernate(sim, ic, cosmo, &pcls_cdm, &pcls_b, pcls_ncdm, phi, chi, Bi, a, tau, dtau, cycle, restartcount);  // FIXME
 			restartcount++;
 		}
 		

@@ -11,6 +11,7 @@
 #include "particles/LATfield2_perfParticles.hpp"
 #include "metadata.hpp"
 #include "Particles_gevolution.hpp"
+#include "gevolution.hpp"
 #include <gsl/gsl_rng.h>
 
 #ifndef VELOCITY_DECAY
@@ -205,7 +206,7 @@ int main(int argc, char **argv)
 
         if (r2 < Ngrid[0]*Ngrid[0]/4)
         {
-            potential(x) = -(cos(M_PI*sqrt(r2)/Ngrid[0])-1.0)*0.05;
+            potential(x) = -(cos(M_PI*sqrt(r2)/Ngrid[0])-1.0)*0.005;
         }
         else
         {
@@ -228,14 +229,16 @@ int main(int argc, char **argv)
     projection_init(&density_old);
 
     for (int i = 0; i < 5; i++) // warm-up
-        scalarProjectionCIC_project(&particles_old, &density_old);
+        projection_T00_project(&particles_old, &density_old, 1, &potential);
+        //scalarProjectionCIC_project(&particles_old, &density_old);
 
     nvtxRangePushA("test of old CIC");
     parallel.barrier();
     auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < benchmark_iterations; i++) 
     {
-        scalarProjectionCIC_project(&particles_old, &density_old);
+        //scalarProjectionCIC_project(&particles_old, &density_old);
+        projection_T00_project(&particles_old, &density_old, 1, &potential);
         parallel.barrier();
     }
     auto end = std::chrono::high_resolution_clock::now();
@@ -247,14 +250,16 @@ int main(int argc, char **argv)
     projection_init(&density_new);
     
     for (int i = 0; i < 5; i++) // warm-up
-        particles_new.meshprojection_project(&density_new);
+        projection_T00_project(&particles_new, &density_new, 1, &potential);
+        //particles_new.meshprojection_project(&density_new);
 
     nvtxRangePushA("test of new CIC");
     parallel.barrier();
     start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < benchmark_iterations; i++)
     {
-        particles_new.meshprojection_project(&density_new);
+        //particles_new.meshprojection_project(&density_new);
+        projection_T00_project(&particles_new, &density_new, 1, &potential);
         parallel.barrier();
     }
     end = std::chrono::high_resolution_clock::now();
@@ -504,7 +509,8 @@ int main(int argc, char **argv)
     for (int i = 0; i < benchmark_iterations; i++)
     {
         projection_init(&density_old);
-        scalarProjectionCIC_project(&particles_old, &density_old);
+        //scalarProjectionCIC_project(&particles_old, &density_old);
+        projection_T00_project(&particles_old, &density_old, 1, &potential);
         scalarProjectionCIC_comm(&density_old);
         maxvel_old = particles_old.updateVel(kick_function, 0.005, potentials, 1);
         COUT << ", " << maxvel_old;
@@ -524,7 +530,8 @@ int main(int argc, char **argv)
     for (int i = 0; i < benchmark_iterations; i++)
     {
         projection_init(&density_new);
-        particles_new.meshprojection_project(&density_new);
+        //particles_new.meshprojection_project(&density_new);
+        projection_T00_project(&particles_new, &density_new, 1, &potential);
         scalarProjectionCIC_comm(&density_new);
         maxvel_new = particles_new.updateVel(kick_function_struct(), 0.005, potentials, 1);
         COUT << ", " << maxvel_new;

@@ -61,7 +61,7 @@ using namespace std;
 // 
 //////////////////////////
 
-void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, const double a, const double dtau_old, const int done_hij, const int snapcount, string h5filename, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_cdm, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_b, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_ncdm, Field<Real> * phi, Field<Real> * chi, Field<Real> * Bi, Field<Real> * source, Field<Real> * Sij, Field<Cplx> * scalarFT, Field<Cplx> * BiFT, Field<Cplx> * SijFT, PlanFFT<Cplx> * plan_phi, PlanFFT<Cplx> * plan_chi, PlanFFT<Cplx> * plan_Bi, PlanFFT<Cplx> * plan_source, PlanFFT<Cplx> * plan_Sij
+void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, const double a, const double dtau_old, const int done_hij, const int snapcount, string h5filename, perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles_gevolution<part_simple,part_simple_info> * pcls_b, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_ncdm, Field<Real> * phi, Field<Real> * chi, Field<Real> * Bi, Field<Real> * source, Field<Real> * Sij, Field<Cplx> * scalarFT, Field<Cplx> * BiFT, Field<Cplx> * SijFT, PlanFFT<Cplx> * plan_phi, PlanFFT<Cplx> * plan_chi, PlanFFT<Cplx> * plan_Bi, PlanFFT<Cplx> * plan_source, PlanFFT<Cplx> * plan_Sij
 #ifdef CHECK_B
 , Field<Real> * Bi_check, Field<Cplx> * BiFT_check, PlanFFT<Cplx> * plan_Bi_check
 #endif
@@ -85,9 +85,9 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 	
 	if (sim.out_snapshot & MASK_PCLS)
 	{
-		pcls_cdm->saveHDF5_server_open(h5filename + filename + "_cdm");
+		/*pcls_cdm->saveHDF5_server_open(h5filename + filename + "_cdm");
 		if (sim.baryon_flag)
-			pcls_b->saveHDF5_server_open(h5filename + filename + "_b");
+			pcls_b->saveHDF5_server_open(h5filename + filename + "_b");*/
 		for (i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
@@ -449,18 +449,18 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 	if (sim.out_snapshot & MASK_PCLS)
 	{
 #ifdef EXTERNAL_IO
-		pcls_cdm->saveHDF5_server_write();
+		/*pcls_cdm->saveHDF5_server_write();
 		if (sim.baryon_flag)
-			pcls_b->saveHDF5_server_write();
+			pcls_b->saveHDF5_server_write();*/
 		for (i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 			pcls_ncdm[i].saveHDF5_server_write();
 		}
 #else
-		pcls_cdm->saveHDF5(h5filename + filename + "_cdm", 1);
+		/*pcls_cdm->saveHDF5(h5filename + filename + "_cdm", 1);
 		if (sim.baryon_flag)
-			pcls_b->saveHDF5(h5filename + filename + "_b", 1);
+			pcls_b->saveHDF5(h5filename + filename + "_b", 1);*/
 		for (i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
@@ -512,7 +512,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 // 
 //////////////////////////
 
-void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, const double a, const double tau, const double dtau, const double dtau_old, const double maxvel, const int cycle, string h5filename, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_cdm, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_b, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_ncdm, Field<Real> * phi, Field<Real> * chi, Field<Real> * Bi, Field<Real> * Sij, Field<Cplx> * BiFT, Field<Cplx> * SijFT, PlanFFT<Cplx> * plan_Bi, PlanFFT<Cplx> * plan_Sij, int & done_hij, set<long> ** IDbacklog)
+void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, const double a, const double tau, const double dtau, const double dtau_old, const double maxvel, const int cycle, string h5filename, perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles_gevolution<part_simple,part_simple_info> * pcls_b, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_ncdm, Field<Real> * phi, Field<Real> * chi, Field<Real> * Bi, Field<Real> * Sij, Field<Cplx> * BiFT, Field<Cplx> * SijFT, PlanFFT<Cplx> * plan_Bi, PlanFFT<Cplx> * plan_Sij, int & done_hij, set<long> ** IDbacklog)
 {
 	int i, j, n, p;
 	double d;
@@ -2362,7 +2362,7 @@ void writeSpectra(metadata & sim, cosmology & cosmo, const double fourpiG, const
 #ifdef HAVE_CLASS
 background & class_background, perturbs & class_perturbs, icsettings & ic,
 #endif
-Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_cdm, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_b, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_ncdm, Field<Real> * phi, Field<Real> * chi, Field<Real> * Bi, Field<Real> * source, Field<Real> * Sij, Field<Cplx> * zetaFT, Field<Cplx> * scalarFT, Field<Cplx> * BiFT, Field<Cplx> * SijFT, PlanFFT<Cplx> * plan_phi, PlanFFT<Cplx> * plan_chi, PlanFFT<Cplx> * plan_Bi, PlanFFT<Cplx> * plan_source, PlanFFT<Cplx> * plan_Sij
+perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles_gevolution<part_simple,part_simple_info> * pcls_b, Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_ncdm, Field<Real> * phi, Field<Real> * chi, Field<Real> * Bi, Field<Real> * source, Field<Real> * Sij, Field<Cplx> * zetaFT, Field<Cplx> * scalarFT, Field<Cplx> * BiFT, Field<Cplx> * SijFT, PlanFFT<Cplx> * plan_phi, PlanFFT<Cplx> * plan_chi, PlanFFT<Cplx> * plan_Bi, PlanFFT<Cplx> * plan_source, PlanFFT<Cplx> * plan_Sij
 #ifdef CHECK_B
 , Field<Real> * Bi_check, Field<Cplx> * BiFT_check, PlanFFT<Cplx> * plan_Bi_check
 #endif

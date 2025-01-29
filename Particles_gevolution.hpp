@@ -26,7 +26,16 @@ template <typename part, typename part_info>
 __global__ void count_tracer_particles(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, long * npart, int * npart_row);
 
 template <typename part, typename part_info>
+__global__ void count_tracer_particles(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real inner, Real outer, Real dtau_old, double vertex[MAX_INTERSECTS][3], int vertexcount, long * npart, int * npart_row, int * npart_checkID_row);
+
+template <typename part, typename part_info>
+__global__ void buffer_tracer_IDs(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real inner, Real outer, Real dtau_old, double vertex[MAX_INTERSECTS][3], int vertexcount, long * IDs, long row_offset, unsigned long long int * buffer_count);
+
+template <typename part, typename part_info>
 __global__ void buffer_tracer_particles(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, double dtau_pos, double dtau_vel, double a, double boxsize, Field<Real> * phi, float * posdata, float * veldata, long * IDs, long row_offset, unsigned long long int * buffer_count);
+
+template <typename part, typename part_info, int IDlog_scatter = 0>
+__global__ void buffer_tracer_particles(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real dist, Real inner, Real outer, double dtau, double dtau_old, double a, double dadtau, double boxsize, Real * domain, Field<Real> * phi, double vertex[MAX_INTERSECTS][3], int vertexcount, float * posdata, float * veldata, long * IDs, char * loginfo, long row_offset, unsigned long long int * buffer_count1, unsigned long long int * buffer_count2);
 
 template <typename part, typename part_info>
 __global__ void add_particles(perfParticles_gevolution<part, part_info> * pcl, float * posdata, float * veldata, void * IDs, uint32_t count, unsigned long long int * buffer_idx);
@@ -56,7 +65,16 @@ class perfParticles_gevolution: public perfParticles<part, part_info>
 		friend __global__ void count_tracer_particles(perfParticles_gevolution<part2, part_info2> * pcl, int tracer_factor, long * npart, int * npart_row);
 
 		template <typename part2, typename part_info2>
+		friend __global__ void count_tracer_particles(perfParticles_gevolution<part2, part_info2> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real inner, Real outer, Real dtau_old, double vertex[MAX_INTERSECTS][3], int vertexcount, long * npart, int * npart_row, int * npart_checkID_row);
+
+		template <typename part2, typename part_info2>
+		friend __global__ void buffer_tracer_IDs(perfParticles_gevolution<part2, part_info2> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real inner, Real outer, Real dtau_old, double vertex[MAX_INTERSECTS][3], int vertexcount, long * IDs, long row_offset, unsigned long long int * buffer_count);
+
+		template <typename part2, typename part_info2>
 		friend __global__ void buffer_tracer_particles(perfParticles_gevolution<part2, part_info2> * pcl, int tracer_factor, double dtau_pos, double dtau_vel, double a, double boxsize, Field<Real> * phi, float * posdata, float * veldata, long * IDs, long row_offset, unsigned long long int * buffer_count);
+
+		template <typename part2, typename part_info2, int IDlog_scatter>
+		friend __global__ void buffer_tracer_particles(perfParticles_gevolution<part2, part_info2> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real dist, Real inner, Real outer, double dtau, double dtau_old, double a, double dadtau, double boxsize, Real * domain, Field<Real> * phi, double vertex[MAX_INTERSECTS][3], int vertexcount, float * posdata, float * veldata, long * IDs, char * loginfo, long row_offset, unsigned long long int * buffer_count1, unsigned long long int * buffer_count2);
 
 		template <typename part2, typename part_info2>
 		friend __global__ void add_particles(perfParticles_gevolution<part2, part_info2> * pcl, float * posdata, float * veldata, void * IDs, uint32_t count, unsigned long long int * buffer_idx);
@@ -1001,7 +1019,7 @@ void Particles_gevolution<part,part_info,part_dataType>::saveGadget2(string file
 
 // CUDA kernel to count particles to be written
 template <typename part, typename part_info>
-__global__ void count_tracer_particles(perfParticles<part, part_info> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real inner, Real outer, Real dtau_old, double vertex[MAX_INTERSECTS][3], int vertexcount, long * npart, int * npart_row, int * npart_checkID_row)
+__global__ void count_tracer_particles(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real inner, Real outer, Real dtau_old, double vertex[MAX_INTERSECTS][3], int vertexcount, long * npart, int * npart_row, int * npart_checkID_row)
 {
 	int row = blockIdx.x;
 	int thread_id = threadIdx.x;
@@ -1046,7 +1064,7 @@ __global__ void count_tracer_particles(perfParticles<part, part_info> * pcl, int
 
 // CUDA kernel to write particle IDs to buffers
 template <typename part, typename part_info>
-__global__ void buffer_tracer_IDs(perfParticles<part, part_info> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real inner, Real outer, Real dtau_old, double vertex[MAX_INTERSECTS][3], int vertexcount, long * IDs, long row_offset, unsigned long long int * buffer_count)
+__global__ void buffer_tracer_IDs(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real inner, Real outer, Real dtau_old, double vertex[MAX_INTERSECTS][3], int vertexcount, long * IDs, long row_offset, unsigned long long int * buffer_count)
 {
 	int row = blockIdx.x + row_offset;
 	int thread_id = threadIdx.x;
@@ -1076,8 +1094,8 @@ __global__ void buffer_tracer_IDs(perfParticles<part, part_info> * pcl, int trac
 
 
 // CUDA kernel to write particles to buffers
-template <typename part, typename part_info, int IDlog_scatter = 0>
-__global__ void buffer_tracer_particles(perfParticles<part, part_info> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real dist, Real inner, Real outer, double dtau, double dtau_old, double a, double dadtau, double boxsize, Real * domain, Field<Real> * phi, double vertex[MAX_INTERSECTS][3], int vertexcount, float * posdata, float * veldata, long * IDs, char * loginfo, long row_offset, unsigned long long int * buffer_count1, unsigned long long int * buffer_count2)
+template <typename part, typename part_info, int IDlog_scatter>
+__global__ void buffer_tracer_particles(perfParticles_gevolution<part, part_info> * pcl, int tracer_factor, lightcone_geometry & lightcone, Real dist, Real inner, Real outer, double dtau, double dtau_old, double a, double dadtau, double boxsize, Real * domain, Field<Real> * phi, double vertex[MAX_INTERSECTS][3], int vertexcount, float * posdata, float * veldata, long * IDs, char * loginfo, long row_offset, unsigned long long int * buffer_count1, unsigned long long int * buffer_count2)
 {
 	int row = blockIdx.x + row_offset;
 	int thread_id = threadIdx.x;
@@ -1371,7 +1389,7 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 			{
 				buffer_count1 = 0;
 
-				buffer_tracer_particles<part, part_info, IDlog_scatter><<<row_count, 128>>>(this, tracer_factor, lightcone, dist, inner, outer, dtau, dtau_old, dadtau, this->boxSize_[0], domain, phi, vertex, vertexcount, posdata, veldata, IDs, loginfo, row_start, &buffer_count1, &buffer_count2);
+				buffer_tracer_particles<part, part_info, IDlog_scatter><<<row_count, 128>>>(this, tracer_factor, lightcone, (Real) dist, inner, outer, dtau, dtau_old, (double) hdr.time, dadtau, this->boxSize_[0], domain, phi, vertex, vertexcount, posdata, veldata, IDs, loginfo, row_start, &buffer_count1, &buffer_count2);
 
 				success = cudaDeviceSynchronize();
 

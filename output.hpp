@@ -562,7 +562,6 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 	MPI_File mapfile;
 	MPI_Status status;
 	int io_group_size;
-	long pixcount = 0;
 	
 	for (j = 0; j < 9*LIGHTCONE_MAX_FIELDS; j++)
 		pixbuf[j/9][j%9] = NULL;
@@ -881,8 +880,6 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 					
 					for (q = 0; q < pixbatch_size[pixbatch_type].back(); pix++)
 					{
-						pixcount++;
-
 						if (pixbatch_type)
 						{
 							nest2ring64(maphdr.Nside, pix, &pix2);

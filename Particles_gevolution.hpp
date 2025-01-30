@@ -1291,6 +1291,8 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 
 			npart -= reject;
 		}
+
+		row_start += row_count;
 	}
 
 	// communicate number of particles to be written

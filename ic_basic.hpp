@@ -17,6 +17,7 @@
 #include <gsl/gsl_spline.h>
 #include "parser.hpp"
 #include "tools.hpp"
+#include <nvtx3/nvToolsExt.h>
 
 #ifndef Cplx
 #define Cplx Imag
@@ -1690,7 +1691,6 @@ background & class_background, perturbs & class_perturbs,
 #endif
 parameter * params, int & numparam)
 {
-	int i, p;
 	double a = 1. / (1. + sim.z_in);
 	float * pcldata = NULL;
 	gsl_spline * pkspline = NULL;
@@ -1732,11 +1732,14 @@ parameter * params, int & numparam)
 		parallel.abortForce();
 	}
 	
+	nvtxRangePushA("generateCICKernel");
 	if (ic.flags & ICFLAG_CORRECT_DISPLACEMENT)
 		generateCICKernel(*source, sim.numpcl[0], pcldata, ic.numtile[0]);
 	else
 		generateCICKernel(*source);	
+	nvtxRangePop();
 	
+	nvtxRangePushA("generate displacement field(s)");
 	plan_source->execute(FFT_FORWARD);
 	
 	if (ic.pkfile[0] != '\0')	// initial displacements & velocities are derived from a single power spectrum
@@ -1751,15 +1754,18 @@ parameter * params, int & numparam)
 		
 		temp1 = (double *) malloc(pkspline->size * sizeof(double));
 		temp2 = (double *) malloc(pkspline->size * sizeof(double));
-		
-		for (i = 0; i < (int) pkspline->size; i++)
+
+#pragma omp parallel for		
+		for (int i = 0; i < pkspline->size; i++)
 		{
 			temp1[i] = pkspline->x[i];
 			temp2[i] = pkspline->y[i] / sim.boxsize / sim.boxsize;
 		}
+
+		int size = pkspline->size;
 		gsl_spline_free(pkspline);
-		pkspline = gsl_spline_alloc(gsl_interp_cspline, i);
-		gsl_spline_init(pkspline, temp1, temp2, i);
+		pkspline = gsl_spline_alloc(gsl_interp_cspline, size);
+		gsl_spline_init(pkspline, temp1, temp2, size);
 	
 		generateDisplacementField(*scalarFT, sim.gr_flag * Hconf(a, fourpiG, cosmo) * Hconf(a, fourpiG, cosmo), pkspline, (unsigned int) ic.seed, ic.flags & ICFLAG_KSPHERE);
 	}
@@ -1768,7 +1774,9 @@ parameter * params, int & numparam)
 #ifdef HAVE_CLASS
 		if (ic.tkfile[0] == '\0')
 		{
+			nvtxRangePushA("CLASS");
 			initializeCLASSstructures(sim, ic, cosmo, class_background, class_perturbs, params, numparam);
+			nvtxRangePop();
 
 			loadBGFunctions(class_background, cosmo.Hspline, "H [1/Mpc]", 1.05 * sim.z_in + 0.05, sim.boxsize/cosmo.h);
 			cosmo.acc_H = gsl_interp_accel_alloc();
@@ -1787,8 +1795,9 @@ parameter * params, int & numparam)
 		
 		temp1 = (double *) malloc(tk_d1->size * sizeof(double));
 		temp2 = (double *) malloc(tk_d1->size * sizeof(double));
-		
-		for (i = 0; i < tk_d1->size; i++) // construct phi
+
+#pragma omp parallel for		
+		for (int i = 0; i < tk_d1->size; i++) // construct phi
 			temp1[i] = -M_PI * tk_d1->y[i] * sqrt(Pk_primordial(tk_d1->x[i] * cosmo.h / sim.boxsize, ic) / tk_d1->x[i]) * tk_d1->x[i];
 
 		pkspline = gsl_spline_alloc(gsl_interp_cspline, tk_d1->size);
@@ -1816,12 +1825,14 @@ parameter * params, int & numparam)
 
 		if (sim.gr_flag == 0)
 		{	
-			for (i = 0; i < tk_t2->size; i++) // construct gauge correction for N-body gauge (3 Hconf theta_tot / k^2 = 3 Hconf eta' / (Hconf^2 - Hconf'))
+#pragma omp parallel for
+			for (int i = 0; i < tk_t2->size; i++) // construct gauge correction for N-body gauge (3 Hconf theta_tot / k^2 = 3 Hconf eta' / (Hconf^2 - Hconf'))
 				temp2[i] = 3. * tk_t2->y[i] / rescale;
 		}
 		else
 		{
-			for (i = 0; i < tk_t2->size; i++) // construct gauge correction for Poisson gauge (3 phi - 3 eta)
+#pragma omp parallel for
+			for (int i = 0; i < tk_t2->size; i++) // construct gauge correction for Poisson gauge (3 phi - 3 eta)
 				temp2[i] = 3. * tk_d1->y[i] - 3. * tk_d2->y[i];
 		}
 
@@ -1833,7 +1844,8 @@ parameter * params, int & numparam)
 
 		if (sim.gr_flag > 0)
 		{
-			for (i = 0; i < tk_t2->size; i++)
+#pragma omp parallel for
+			for (int i = 0; i < tk_t2->size; i++)
 				temp1[i] = 3. * tk_t2->y[i];
 		}
 		else
@@ -1843,7 +1855,8 @@ parameter * params, int & numparam)
 				COUT << COLORTEXT_YELLOW << " /!\\ warning" << COLORTEXT_RESET << ": gauge correction for N-body gauge velocities cannot be computed accurately from the transfer functions at a single redshift!" << endl;
 			}
 
-			for (i = 0; i < tk_t2->size; i++)
+#pragma omp parallel for
+			for (int i = 0; i < tk_t2->size; i++)
 				temp1[i] = 0.;
 		}
 
@@ -1854,7 +1867,9 @@ parameter * params, int & numparam)
 			{
 				loadTransferFunctions(class_background, class_perturbs, tk_d1, tk_t1, "eta", sim.boxsize, 1./1.01/a - 1., cosmo.h);
 				rescale = -gsl_spline_eval_deriv(cosmo.Hspline, 1.01*a, cosmo.acc_H) * a * a * 1.0201;
-				for (i = 0; i < tk_t1->size; i++)
+
+#pragma omp parallel for
+				for (int i = 0; i < tk_t1->size; i++)
 					temp1[i] = (temp2[i] - 3. * tk_t1->y[i] / rescale) * 100. * Hconf(1.005 * a, fourpiG, cosmo);
 
 				gsl_spline_free(tk_d1);
@@ -1875,7 +1890,8 @@ parameter * params, int & numparam)
 			}
 		}
 
-		for (i = 0; i < tk_t1->size; i++)
+#pragma omp parallel for
+		for (int i = 0; i < tk_t1->size; i++)
 			temp1[i] += tk_t1->y[i] * 0.5;
 
 		gsl_spline_free(tk_d1);
@@ -1923,7 +1939,8 @@ parameter * params, int & numparam)
 		
 		if (sim.baryon_flag == 2)	// baryon treatment = blend; compute displacement & velocity from weighted average
 		{
-			for (i = 0; i < tk_d1->size; i++)
+#pragma omp parallel for
+			for (int i = 0; i < tk_d1->size; i++)
 			{
 					temp1[i] = (sim.gr_flag > 0 ? -3. * pkspline->y[i] / pkspline->x[i] / pkspline->x[i] : 0.) - ((cosmo.Omega_cdm * tk_d1->y[i] + cosmo.Omega_b * tk_d2->y[i]) / (cosmo.Omega_cdm + cosmo.Omega_b) + dgaugespline->y[i]) * M_PI * sqrt(Pk_primordial(tk_d1->x[i] * cosmo.h / sim.boxsize, ic) / tk_d1->x[i]) / tk_d1->x[i];
 					temp2[i] = -a * ((cosmo.Omega_b * tk_t2->y[i]) / (cosmo.Omega_cdm + cosmo.Omega_b) + vgaugespline->y[i]) * M_PI * sqrt(Pk_primordial(tk_d1->x[i] * cosmo.h / sim.boxsize, ic) / tk_d1->x[i]) / tk_d1->x[i];
@@ -1943,7 +1960,8 @@ parameter * params, int & numparam)
 		{
 			if (8. * cosmo.Omega_b / (cosmo.Omega_cdm + cosmo.Omega_b) > 1.)
 			{
-				for (i = 0; i < tk_d1->size; i++)
+#pragma omp parallel for
+				for (int i = 0; i < tk_d1->size; i++)
 				{
 						temp1[i] = (sim.gr_flag > 0 ? -3. * pkspline->y[i] / pkspline->x[i] / pkspline->x[i] : 0.) - ((8. * cosmo.Omega_cdm * tk_d1->y[i] + (7. * cosmo.Omega_b - cosmo.Omega_cdm) * tk_d2->y[i]) / (cosmo.Omega_cdm + cosmo.Omega_b) / 7. + dgaugespline->y[i]) * M_PI * sqrt(Pk_primordial(tk_d1->x[i] * cosmo.h / sim.boxsize, ic) / tk_d1->x[i]) / tk_d1->x[i];
 						temp2[i] = -a * (((7. * cosmo.Omega_b - cosmo.Omega_cdm) * tk_t2->y[i]) / (cosmo.Omega_cdm + cosmo.Omega_b) / 7. + vgaugespline->y[i]) * M_PI * sqrt(Pk_primordial(tk_d1->x[i] * cosmo.h / sim.boxsize, ic) / tk_d1->x[i]) / tk_d1->x[i];
@@ -1958,7 +1976,8 @@ parameter * params, int & numparam)
 			}
 			else
 			{
-				for (i = 0; i < tk_d1->size; i++)
+#pragma omp parallel for
+				for (int i = 0; i < tk_d1->size; i++)
 				{
 					temp1[i] = (sim.gr_flag > 0 ? -3. * pkspline->y[i] / pkspline->x[i] / pkspline->x[i] : 0.) - (((cosmo.Omega_cdm - 7. * cosmo.Omega_b) * tk_d1->y[i] + 8. * cosmo.Omega_b * tk_d2->y[i]) / (cosmo.Omega_cdm + cosmo.Omega_b) + dgaugespline->y[i]) * M_PI * sqrt(Pk_primordial(tk_d1->x[i] * cosmo.h / sim.boxsize, ic) / tk_d1->x[i]) / tk_d1->x[i];
 					temp2[i] = -a * ((8. * cosmo.Omega_b * tk_t2->y[i]) / (cosmo.Omega_cdm + cosmo.Omega_b) + vgaugespline->y[i]) * M_PI * sqrt(Pk_primordial(tk_d1->x[i] * cosmo.h / sim.boxsize, ic) / tk_d1->x[i]) / tk_d1->x[i];
@@ -1975,7 +1994,8 @@ parameter * params, int & numparam)
 		
 		if (sim.baryon_flag == 1 || (sim.baryon_flag == 3 && 8. * cosmo.Omega_b / (cosmo.Omega_cdm + cosmo.Omega_b) > 1.)) // compute baryonic displacement & velocity
 		{
-			for (i = 0; i < tk_d1->size; i++)
+#pragma omp parallel for
+			for (int i = 0; i < tk_d1->size; i++)
 			{
 					temp1[i] = (sim.gr_flag > 0 ? -3. * pkspline->y[i] / pkspline->x[i] / pkspline->x[i] : 0.) - (tk_d2->y[i] + dgaugespline->y[i]) * M_PI * sqrt(Pk_primordial(tk_d2->x[i] * cosmo.h / sim.boxsize, ic) / tk_d2->x[i]) / tk_d2->x[i];
 					temp2[i] = -a * (tk_t2->y[i] + vgaugespline->y[i]) * M_PI * sqrt(Pk_primordial(tk_d2->x[i] * cosmo.h / sim.boxsize, ic) / tk_d2->x[i]) / tk_d2->x[i];			
@@ -1991,7 +2011,8 @@ parameter * params, int & numparam)
 		
 		if (sim.baryon_flag < 2 || (sim.baryon_flag == 3 && 8. * cosmo.Omega_b / (cosmo.Omega_cdm + cosmo.Omega_b) <= 1.))	// compute CDM displacement & velocity
 		{
-			for (i = 0; i < tk_d1->size; i++)
+#pragma omp parallel for
+			for (int i = 0; i < tk_d1->size; i++)
 			{
 					temp1[i] = (sim.gr_flag > 0 ? -3. * pkspline->y[i] / pkspline->x[i] / pkspline->x[i] : 0.) - (tk_d1->y[i] + dgaugespline->y[i]) * M_PI * sqrt(Pk_primordial(tk_d1->x[i] * cosmo.h / sim.boxsize, ic) / tk_d1->x[i]) / tk_d1->x[i];
 					temp2[i] = -a * vgaugespline->y[i] * M_PI * sqrt(Pk_primordial(tk_d1->x[i] * cosmo.h / sim.boxsize, ic) / tk_d1->x[i]) / tk_d1->x[i];
@@ -2020,6 +2041,7 @@ parameter * params, int & numparam)
 		
 	plan_chi->execute(FFT_BACKWARD);
 	chi->updateHalo();	// chi now contains the CDM displacement
+	nvtxRangePop();
 	
 	strcpy(pcls_cdm_info.type_name, "part_simple");
 	if (sim.baryon_flag == 1)
@@ -2031,16 +2053,22 @@ parameter * params, int & numparam)
 	uint64_t capacity = (16L * sim.numpcl[0] * (long) ic.numtile[0] * (long) ic.numtile[0] * (long) ic.numtile[0]) / (parallel.size() * 15L);
 	
 	//pcls_cdm->initialize(pcls_cdm_info, pcls_cdm_dataType, &(phi->lattice()), boxSize);
+	nvtxRangePushA("initialize CDM particles: memory allocation");
 	pcls_cdm->initialize(pcls_cdm_info, &(phi->lattice()), boxSize, capacity+PCL_EXTRA_CAPACITY, PCL_EXTRA_CAPACITY);
+	nvtxRangePop();
 	
+	nvtxRangePushA("initialize CDM particles: positions");
 	initializeParticlePositions(sim.numpcl[0], pcldata, ic.numtile[0], *pcls_cdm);
 	pcls_cdm->updateRowBuffers();
+	nvtxRangePop();
 
-	i = MAX;
+	nvtxRangePushA("initialize CDM particles: displacements");
+	int op = MAX;
 	if (sim.baryon_flag == 3)	// baryon treatment = hybrid; displace particles using both displacement fields
-		pcls_cdm->moveParticles(displace_pcls_ic_basic_functor(), 1., ic_fields, 2, NULL, &max_displacement, &i, 1);
+		pcls_cdm->moveParticles(displace_pcls_ic_basic_functor(), 1., ic_fields, 2, NULL, &max_displacement, &op, 1);
 	else
-		pcls_cdm->moveParticles(displace_pcls_ic_basic_functor(), 1., &chi, 1, NULL, &max_displacement, &i, 1);	// displace CDM particles
+		pcls_cdm->moveParticles(displace_pcls_ic_basic_functor(), 1., &chi, 1, NULL, &max_displacement, &op, 1);	// displace CDM particles
+	nvtxRangePop();
 	
 	sim.numpcl[0] *= (long) ic.numtile[0] * (long) ic.numtile[0] * (long) ic.numtile[0];
 	
@@ -2080,8 +2108,7 @@ parameter * params, int & numparam)
 		initializeParticlePositions(sim.numpcl[1], pcldata, ic.numtile[1], *pcls_b);
 		pcls_b->updateRowBuffers();
 
-		i = MAX;
-		pcls_b->moveParticles(displace_pcls_ic_basic_functor(), 1., &phi, 1, NULL, &max_displacement, &i, 1);	// displace baryon particles
+		pcls_b->moveParticles(displace_pcls_ic_basic_functor(), 1., &phi, 1, NULL, &max_displacement, &op, 1);	// displace baryon particles
 	
 		sim.numpcl[1] *= (long) ic.numtile[1] * (long) ic.numtile[1] * (long) ic.numtile[1];
 	
@@ -2090,6 +2117,7 @@ parameter * params, int & numparam)
 		free(pcldata);
 	}
 	
+	nvtxRangePushA("initialize CDM particles: velocities");
 	if (ic.pkfile[0] == '\0')	// set velocities using transfer functions
 	{
 		if (ic.flags & ICFLAG_CORRECT_DISPLACEMENT)
@@ -2119,10 +2147,11 @@ parameter * params, int & numparam)
 		if (sim.baryon_flag == 1)
 			maxvel[1] = pcls_b->updateVel(initialize_q_ic_basic_functor(), 1., &phi, 1) / a;	// set baryon velocities
 	}
+	nvtxRangePop();
 	
 	if (sim.baryon_flag > 1) sim.baryon_flag = 0;
 	
-	for (p = 0; p < cosmo.num_ncdm; p++)	// initialization of non-CDM species
+	for (int p = 0; p < cosmo.num_ncdm; p++)	// initialization of non-CDM species
 	{
 		if (ic.numtile[1+sim.baryon_flag+p] < 1) continue;
 
@@ -2166,8 +2195,9 @@ parameter * params, int & numparam)
 			rescale = (bg_ncdm(a * 1.005, cosmo, p) - bg_ncdm(a * 0.995, cosmo, p)) * 100. / bg_ncdm(a, cosmo, p);
 			rescale = 1. - rescale / 3.;
 #endif
-			
-			for (i = 0; i < tk_d1->size; i++)
+
+#pragma omp parallel for		
+			for (int i = 0; i < tk_d1->size; i++)
 			{
 				temp1[i] = (sim.gr_flag > 0 ? -3. * pkspline->y[i] / pkspline->x[i] / pkspline->x[i] : 0.) - (tk_d1->y[i] + dgaugespline->y[i] * rescale) * M_PI * sqrt(Pk_primordial(tk_d1->x[i] * cosmo.h / sim.boxsize, ic) / tk_d1->x[i]) / tk_d1->x[i];
 				temp2[i] = -a * (tk_t1->y[i] + vgaugespline->y[i]) * M_PI * sqrt(Pk_primordial(tk_d1->x[i] * cosmo.h / sim.boxsize, ic) / tk_d1->x[i]) / tk_d1->x[i];
@@ -2200,8 +2230,8 @@ parameter * params, int & numparam)
 		pcls_ncdm[p].initialize(pcls_ncdm_info[p], pcls_ncdm_dataType, &(phi->lattice()), boxSize);
 		
 		initializeParticlePositions(sim.numpcl[1+sim.baryon_flag+p], pcldata, ic.numtile[1+sim.baryon_flag+p], pcls_ncdm[p]);
-		i = MAX;
-		pcls_ncdm[p].moveParticles(displace_pcls_ic_basic, 1., &chi, 1, NULL, &max_displacement, &i, 1);	// displace non-CDM particles
+		
+		pcls_ncdm[p].moveParticles(displace_pcls_ic_basic, 1., &chi, 1, NULL, &max_displacement, &op, 1);	// displace non-CDM particles
 		
 		sim.numpcl[1+sim.baryon_flag+p] *= (long) ic.numtile[1+sim.baryon_flag+p] * (long) ic.numtile[1+sim.baryon_flag+p] * (long) ic.numtile[1+sim.baryon_flag+p];
 	
@@ -2216,6 +2246,7 @@ parameter * params, int & numparam)
 	free(temp1);
 	free(temp2);
 	
+	nvtxRangePushA("initialize phi");
 	if (ic.pkfile[0] == '\0')
 	{
 		plan_source->execute(FFT_FORWARD);
@@ -2223,11 +2254,12 @@ parameter * params, int & numparam)
 	}
 	else
 	{
-		projection_init(source);
+		//projection_init(source);
+		thrust::fill_n(thrust::device, source->data(), source->lattice().sitesLocalGross(), Real(0));
 		scalarProjectionCIC_project(pcls_cdm, source);
 		if (sim.baryon_flag)
 			scalarProjectionCIC_project(pcls_b, source);
-		for (p = 0; p < cosmo.num_ncdm; p++)
+		for (int p = 0; p < cosmo.num_ncdm; p++)
 		{
 			if (ic.numtile[1+sim.baryon_flag+p] < 1) continue;
 			scalarProjectionCIC_project(pcls_ncdm+p, source);
@@ -2245,6 +2277,7 @@ parameter * params, int & numparam)
 	
 	plan_phi->execute(FFT_BACKWARD);
 	phi->updateHalo();	// phi now finally contains phi
+	nvtxRangePop();
 	
 	if (ic.pkfile[0] != '\0')	// if power spectrum is used instead of transfer functions, set velocities using linear approximation
 	{	
@@ -2254,7 +2287,7 @@ parameter * params, int & numparam)
 			maxvel[1] = pcls_b->updateVel(initialize_q_ic_basic_functor(), rescale, &phi, 1) / a;
 	}
 			
-	for (p = 0; p < cosmo.num_ncdm; p++)
+	for (int p = 0; p < cosmo.num_ncdm; p++)
 	{
 		if (ic.numtile[1+sim.baryon_flag+p] < 1)
 		{
@@ -2283,7 +2316,9 @@ parameter * params, int & numparam)
 #endif
 	}
 	
-	projection_init(Bi);
+	nvtxRangePushA("initialize B");
+	//projection_init(Bi);
+	thrust::fill_n(thrust::device, Bi->data(), 3*Bi->lattice().sitesLocalGross(), Real(0));
 	projection_T0i_project(pcls_cdm, Bi, phi);
 	if (sim.baryon_flag)
 		projection_T0i_project(pcls_b, Bi, phi);
@@ -2292,18 +2327,22 @@ parameter * params, int & numparam)
 	projectFTvector(*BiFT, *BiFT, fourpiG / (double) sim.numpts / (double) sim.numpts);	
 	plan_Bi->execute(FFT_BACKWARD);	
 	Bi->updateHalo();	// B initialized
+	nvtxRangePop();
 	
-	projection_init(Sij);
+	nvtxRangePushA("initialize chi");
+	//projection_init(Sij);
+	thrust::fill_n(thrust::device, Sij->data(), 6*Sij->lattice().sitesLocalGross(), Real(0));
 	projection_Tij_project(pcls_cdm, Sij, a, phi);
 	if (sim.baryon_flag)
 		projection_Tij_project(pcls_b, Sij, a, phi);
 	projection_Tij_comm(Sij);
 	
-	prepareFTsource<Real>(*phi, *Sij, *Sij, 2. * fourpiG / a / (double) sim.numpts / (double) sim.numpts);	
+	prepareFTsource(*phi, *Sij, *Sij, 2. * fourpiG / a / (double) sim.numpts / (double) sim.numpts);	
 	plan_Sij->execute(FFT_FORWARD);	
 	projectFTscalar(*SijFT, *scalarFT);
 	plan_chi->execute(FFT_BACKWARD);		
 	chi->updateHalo();	// chi now finally contains chi
+	nvtxRangePop();
 
 	gsl_spline_free(pkspline);
 	if (dgaugespline != NULL)

@@ -4,9 +4,9 @@
 // 
 // interface to linear Boltzmann code CLASS
 //
-// Author: Julian Adamek (Université de Genève & Observatoire de Paris & Queen Mary University of London)
+// Author: Julian Adamek (Université de Genève & Observatoire de Paris & Queen Mary University of London & Universität Zürich)
 //
-// Last modified: November 2019
+// Last modified: January 2025
 //
 //////////////////////////
 
@@ -439,19 +439,20 @@ void loadTransferFunctions(background & class_background, perturbs & class_pertu
 
 	perturb_output_data(&class_background, &class_perturbs, class_format, z, cols, data);
 
+#pragma omp parallel for
 	for (int i = 0; i < class_perturbs.k_size[class_perturbs.index_md_scalars]; i++)
 	{
 		k[i] = data[i*cols + kcol] * boxsize;
 		tk_d[i] = data[i*cols + dcol];
 		tk_t[i] = data[i*cols + tcol] / h;
-		if (i > 0)
+		/*if (i > 0)
 		{
 			if (k[i] < k[i-1])
 			{
 				COUT << " error in loadTransferFunctions (CLASS interface)! k-values are not strictly ordered." << endl;
 				parallel.abortForce();
 			}
-		}
+		}*/
 	}
 
 	free(data);
@@ -544,18 +545,19 @@ void loadBGFunctions(background & class_background, gsl_spline * & bg_data, cons
     	parallel.abortForce();
 	}
 
+#pragma omp parallel for
 	for (int i = bg_size; i < class_background.bt_size; i++)
 	{
 		a[i-bg_size] = 1. / (1. + data[i*cols + zcol]);
 		bg[i-bg_size] = rescale * data[i*cols + bgcol];
-		if (i > bg_size)
+		/*if (i > bg_size)
 		{
 			if (a[i-bg_size] < a[i-bg_size-1])
 			{
 				COUT << " error in loadBGFunctions (CLASS interface)! a-values are not strictly ordered." << endl;
 				parallel.abortForce();
 			}
-		}
+		}*/
 	}
 
 	z1 = 1./a[class_background.bt_size-bg_size-1] -1.;

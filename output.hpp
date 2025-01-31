@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <algorithm>
 #include <vector>
+#include <nvtx3/nvToolsExt.h>
 
 using namespace std;
 
@@ -157,6 +158,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 				
 	if (sim.out_snapshot & MASK_T00)
 	{
+		nvtxRangePushA("T00 output");
 		projection_init(source);
 		if (sim.gr_flag > 0)
 		{
@@ -189,11 +191,13 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		else
 			source->saveHDF5(h5filename + filename + "_T00.h5");
 #endif
+		nvtxRangePop();
 	}
 	
 #ifdef VELOCITY		
 	if (sim.out_snapshot & MASK_VEL)
 	{
+		nvtxRangePushA("v output");
 #ifdef EXTERNAL_IO
 		vi->saveHDF5_server_write(NUMBER_OF_IO_FILES);
 #else
@@ -202,11 +206,13 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		else
 			vi->saveHDF5(h5filename + filename + "_v.h5");
 #endif
+		nvtxRangePop();
 	}
 #endif
 				
 	if (sim.out_snapshot & MASK_B)
 	{
+		nvtxRangePushA("B output");
 		if (sim.gr_flag == 0)
 		{
 			plan_Bi->execute(FFT_BACKWARD);
@@ -236,34 +242,40 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 			plan_Bi->execute(FFT_BACKWARD);
 			Bi->updateHalo();
 		}
+		nvtxRangePop();
 	}
 			
 	if (sim.out_snapshot & MASK_PHI)
+	{
+		nvtxRangePushA("phi output");	
 #ifdef EXTERNAL_IO
 		phi->saveHDF5_server_write(NUMBER_OF_IO_FILES);
 #else
-	{
 		if (sim.downgrade_factor > 1)
 			phi->saveHDF5_coarseGrain3D(h5filename + filename + "_phi.h5", sim.downgrade_factor);
 		else
 			phi->saveHDF5(h5filename + filename + "_phi.h5");
-	}
 #endif
+		nvtxRangePop();
+	}
 				
 	if (sim.out_snapshot & MASK_CHI)
+	{
+		nvtxRangePushA("chi output");
 #ifdef EXTERNAL_IO
 		chi->saveHDF5_server_write(NUMBER_OF_IO_FILES);
-#else
-	{	
+#else	
 		if (sim.downgrade_factor > 1)
 			chi->saveHDF5_coarseGrain3D(h5filename + filename + "_chi.h5", sim.downgrade_factor);
 		else
 			chi->saveHDF5(h5filename + filename + "_chi.h5");
-	}
 #endif
+		nvtxRangePop();
+	}
 				
 	if (sim.out_snapshot & MASK_HIJ)
 	{
+		nvtxRangePushA("hij output");
 		if (done_hij == 0)
 		{
 			projectFTtensor(*SijFT, *SijFT);
@@ -282,10 +294,12 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		else
 			Sij->saveHDF5(h5filename + filename + "_hij.h5");
 #endif
+		nvtxRangePop();
 	}
 
 	if (sim.out_snapshot & MASK_TIJ)
-	{						
+	{	
+		nvtxRangePushA("Tij output");				
 		projection_init(Sij);
 		projection_Tij_project(pcls_cdm, Sij, a, phi);
 		if (sim.baryon_flag)
@@ -301,10 +315,12 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 			Sij->saveHDF5_coarseGrain3D(h5filename + filename + "_Tij.h5", sim.downgrade_factor);
 		else
 			Sij->saveHDF5(h5filename + filename + "_Tij.h5");
+		nvtxRangePop();
 	}
 			
 	if (sim.out_snapshot & MASK_P)
 	{
+		nvtxRangePushA("p (momentum density) output");
 		projection_init(Bi);
 		projection_T0i_project(pcls_cdm, Bi, phi);
 		if (sim.baryon_flag)
@@ -324,11 +340,13 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 			plan_Bi->execute(FFT_BACKWARD);
 			Bi->updateHalo();
 		}
+		nvtxRangePop();
 	}
 				
 #ifdef CHECK_B
 	if (sim.out_snapshot & MASK_B)
 	{
+		nvtxRangePushA("B check output");
 		if (sim.vector_flag == VECTOR_PARABOLIC)
 		{
 			projection_init(Bi_check);
@@ -360,13 +378,15 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		else
 			Bi_check->saveHDF5(h5filename + filename + "_B_check.h5");
 #endif
+		nvtxRangePop();
 	}
 #endif
 
 	if (sim.out_snapshot & MASK_GADGET)
 	{
+		nvtxRangePushA("Gadget2 output");
 		if (sim.out_snapshot & MASK_MULTI)
-			hdr.num_files = parallel.grid_size()[1];
+			hdr.num_files = parallel.size();
 		else
 			hdr.num_files = 1;
 		hdr.Omega0 = cosmo.Omega_m;
@@ -431,6 +451,9 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		
 		for (i = 0; i < cosmo.num_ncdm; i++)
 		{
+			if (sim.out_snapshot & MASK_MULTI)
+				hdr.num_files = parallel.grid_size()[1];
+				
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0 || sim.tracer_factor[i+1+sim.baryon_flag] == 0) continue;
 			sprintf(buffer, "_ncdm%d", i);
 			hdr.npart[1] = (uint32_t) (((sim.numpcl[i+1+sim.baryon_flag] % sim.tracer_factor[i+1+sim.baryon_flag]) ? (1 + (sim.numpcl[i+1+sim.baryon_flag] / sim.tracer_factor[i+1+sim.baryon_flag])) : (sim.numpcl[i+1+sim.baryon_flag] / sim.tracer_factor[i+1+sim.baryon_flag])) % (1ll << 32));
@@ -444,10 +467,12 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 			else
 				pcls_ncdm[i].saveGadget2(h5filename + filename + buffer, hdr, sim.tracer_factor[i+1+sim.baryon_flag], dtau_pos, dtau_pos + 0.5 * dtau_old, phi);
 		}
+		nvtxRangePop();
 	}
 			
 	if (sim.out_snapshot & MASK_PCLS)
 	{
+		nvtxRangePushA("particle HDF5 output");
 #ifdef EXTERNAL_IO
 		/*pcls_cdm->saveHDF5_server_write();
 		if (sim.baryon_flag)
@@ -468,6 +493,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 			pcls_ncdm[i].saveHDF5(h5filename + filename + buffer, 1);
 		}
 #endif
+		nvtxRangePop();
 	}
 			
 #ifdef EXTERNAL_IO
@@ -691,7 +717,8 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 				}
 			}
 
-#ifdef HAVE_HEALPIX	
+#ifdef HAVE_HEALPIX
+			nvtxRangePushA("HEALPix output");
 			bytes = 0;
 			bytes2 = 0;
 			
@@ -1543,6 +1570,8 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 					outbuf[j] = NULL;
 				}
 			}
+
+			nvtxRangePop();
 #endif // HAVE_HEALPIX
 		}
 		else if (parallel.isRoot() && outfile != NULL)
@@ -1550,6 +1579,7 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 
 		if (sim.out_lightcone[i] & MASK_GADGET && sim.lightcone[i].distance[0] > d - tau + 0.5 * dtau_old && sim.lightcone[i].distance[1] <= d - tau + 0.5 * dtau_old && d - tau + 0.5 * dtau_old > 0.)
 		{
+			nvtxRangePushA("Gadget2 output");
 			n = findIntersectingLightcones(sim.lightcone[i], d - tau + (0.5 + LIGHTCONE_IDCHECK_ZONE) * dtau_old, d - tau - 0.5 * dtau, domain, vertex);
 
 			hdr.num_files = 1;
@@ -1612,6 +1642,8 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 				else
 					pcls_ncdm[p].saveGadget2(h5filename + filename + buffer, hdr, sim.lightcone[i], d - tau, dtau, dtau_old, a * Hconf(a, fourpiG, cosmo), vertex, n, IDbacklog[sim.IDlog_mapping[i]][p+1+sim.baryon_flag], &IDprelog[sim.IDlog_mapping[i]][p+1+sim.baryon_flag], phi, sim.tracer_factor[p+1+sim.baryon_flag]);
 			}
+
+			nvtxRangePop();
 		}
 	}
 	
@@ -1619,6 +1651,7 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 	delete[] outbuf;
 #endif
 
+	nvtxRangePushA("ID log communication");
 	for (int l = 0; l < sim.num_IDlogs; l++)
 	{
 		for (p = 0; p <= cosmo.num_ncdm + sim.baryon_flag; p++)
@@ -2309,6 +2342,8 @@ void writeLightcones(metadata & sim, cosmology & cosmo, const double fourpiG, co
 		delete[] IDprelog[i];
 
 	delete[] IDprelog;
+
+	nvtxRangePop();
 }
 
 
@@ -2570,7 +2605,7 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 		}
 		projection_Tij_comm(Sij);
 
-		prepareFTsource<Real>(*phi, *Sij, *Sij, 2. * fourpiG / (double) sim.numpts / (double) sim.numpts / a);
+		prepareFTsource(*phi, *Sij, *Sij, 2. * fourpiG / (double) sim.numpts / (double) sim.numpts / a);
 		plan_Sij->execute(FFT_FORWARD);
 		projectFTtensor(*SijFT, *SijFT);
 

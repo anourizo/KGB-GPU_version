@@ -336,6 +336,8 @@ int main(int argc, char **argv)
 	tau = -1;
 	dtau = -1;
 	dtau_old = -1;
+
+	nvtxRangePushA("IC generation");
 	
 	if (ic.generator == ICGEN_BASIC)
 		generateIC_basic(sim, ic, cosmo, fourpiG, &pcls_cdm, &pcls_b, pcls_ncdm, maxvel, &phi, &chi, &Bi, &source, &Sij, &scalarFT, &BiFT, &SijFT, &plan_phi, &plan_chi, &plan_Bi, &plan_source, &plan_Sij, 
@@ -362,6 +364,8 @@ int main(int argc, char **argv)
 		COUT << " error: IC generator not implemented!" << endl;
 		parallel.abortForce();
 	}
+
+	nvtxRangePop();
 	
 	if (sim.baryon_flag > 1)
 	{
@@ -391,7 +395,8 @@ int main(int argc, char **argv)
 #endif
 #ifdef VELOCITY
 	a_old = a;
-	projection_init(&vi);
+	//projection_init(&vi);
+	thrust::fill_n(thrust::device, vi.data(), 3*lat.sitesLocalGross(), Real(0));
 #endif
 #ifdef TENSOR_EVOLUTION
 	for (kFT.first(); kFT.test(); kFT.next())
@@ -496,7 +501,9 @@ int main(int argc, char **argv)
 		cycle_start_time = MPI_Wtime();
 #endif
 		// construct stress-energy tensor
-		projection_init(&source);
+		nvtxRangePushA("Construct T00");
+		//projection_init(&source);
+		thrust::fill_n(thrust::device, source.data(), lat.sitesLocalGross(), Real(0));
 #ifdef HAVE_CLASS
 		if (sim.radiation_flag > 0 || sim.fluid_flag > 0)
 			projection_T00_project(class_background, class_perturbs, source, scalarFT, &plan_source, sim, ic, cosmo, fourpiG, a, 1., zetaFT);
@@ -530,11 +537,13 @@ int main(int argc, char **argv)
 			}
 		}
 		projection_T00_comm(&source);
+		nvtxRangePop();
 		
 #ifdef VELOCITY
 		if ((sim.out_pk & MASK_VEL) || (sim.out_snapshot & MASK_VEL))
 		{
-			projection_init(&Bi);
+			//projection_init(&Bi);
+			thrust::fill_n(thrust::device, Bi.data(), 3*lat.sitesLocalGross(), Real(0));
             projection_Ti0_project(&pcls_cdm, &Bi, &phi, &chi);
             vertexProjectionCIC_comm(&Bi);
             compute_vi_rescaled(cosmo, &vi, &source, &Bi, a, a_old);
@@ -544,7 +553,9 @@ int main(int argc, char **argv)
 
 		if (sim.vector_flag == VECTOR_ELLIPTIC)
 		{
-			projection_init(&Bi);
+			nvtxRangePushA("Construct T0i");
+			//projection_init(&Bi);
+			thrust::fill_n(thrust::device, Bi.data(), 3*lat.sitesLocalGross(), Real(0));
 			projection_T0i_project(&pcls_cdm, &Bi, &phi);
 			if (sim.baryon_flag)
 				projection_T0i_project(&pcls_b, &Bi, &phi);
@@ -554,9 +565,12 @@ int main(int argc, char **argv)
 					projection_T0i_project(pcls_ncdm+i, &Bi, &phi);
 			}
 			projection_T0i_comm(&Bi);
+			nvtxRangePop();
 		}
 		
-		projection_init(&Sij);
+		nvtxRangePushA("Construct Tij");
+		//projection_init(&Sij);
+		thrust::fill_n(thrust::device, Sij.data(), 6*lat.sitesLocalGross(), Real(0));
 #ifdef ANISOTROPIC_EXPANSION
 		projection_Tij_project(&pcls_cdm, &Sij, a, &phi, 1., hij_hom);
 #else
@@ -581,12 +595,14 @@ int main(int argc, char **argv)
 			}
 		}
 		projection_Tij_comm(&Sij);
+		nvtxRangePop();
 		
 #ifdef BENCHMARK 
 		projection_time += MPI_Wtime() - cycle_start_time;
 		ref_time = MPI_Wtime();
 #endif
 		
+		nvtxRangePushA("Solve phi");
 		if (sim.gr_flag > 0)
 		{	
 			T00hom = 0.;
@@ -602,23 +618,31 @@ int main(int argc, char **argv)
 			
 			if (dtau_old > 0.)
 			{
-				prepareFTsource<Real>(phi, chi, source, cosmo.Omega_cdm + cosmo.Omega_b + bg_ncdm(a, cosmo), source, 3. * Hconf(a, fourpiG, cosmo) * dx * dx / dtau_old, fourpiG * dx * dx / a, 3. * Hconf(a, fourpiG, cosmo) * Hconf(a, fourpiG, cosmo) * dx * dx);  // prepare nonlinear source for phi update
+				nvtxRangePushA("prepareFTsource");
+				prepareFTsource(phi, chi, source, cosmo.Omega_cdm + cosmo.Omega_b + bg_ncdm(a, cosmo), source, 3. * Hconf(a, fourpiG, cosmo) * dx * dx / dtau_old, fourpiG * dx * dx / a, 3. * Hconf(a, fourpiG, cosmo) * Hconf(a, fourpiG, cosmo) * dx * dx);  // prepare nonlinear source for phi update
+				nvtxRangePop();
 
 #ifdef BENCHMARK
 				ref2_time= MPI_Wtime();
 #endif
+				nvtxRangePushA("FFT forward source");
 				plan_source.execute(FFT_FORWARD);  // go to k-space
+				nvtxRangePop();
 #ifdef BENCHMARK
 				fft_time += MPI_Wtime() - ref2_time;
 				fft_count++;
 #endif
 		
+				nvtxRangePushA("solveModifiedPoissonFT");
 				solveModifiedPoissonFT(scalarFT, scalarFT, 1. / (dx * dx), 3. * Hconf(a, fourpiG, cosmo) / dtau_old);  // phi update (k-space)
+				nvtxRangePop();
 
 #ifdef BENCHMARK
 				ref2_time= MPI_Wtime();
-#endif		
+#endif	
+				nvtxRangePushA("FFT backward phi");	
 				plan_phi.execute(FFT_BACKWARD);	 // go back to position space
+				nvtxRangePop();
 #ifdef BENCHMARK
 				fft_time += MPI_Wtime() - ref2_time;
 				fft_count++;
@@ -630,40 +654,55 @@ int main(int argc, char **argv)
 #ifdef BENCHMARK
 			ref2_time= MPI_Wtime();
 #endif
+			nvtxRangePushA("FFT forward source");
 			plan_source.execute(FFT_FORWARD);  // Newton: directly go to k-space
+			nvtxRangePop();
 #ifdef BENCHMARK
 			fft_time += MPI_Wtime() - ref2_time;
 			fft_count++;
 #endif
 		
+			nvtxRangePushA("solveModifiedPoissonFT");
 			solveModifiedPoissonFT(scalarFT, scalarFT, fourpiG / a);  // Newton: phi update (k-space)
+			nvtxRangePop();
 
 #ifdef BENCHMARK
 			ref2_time= MPI_Wtime();
-#endif		
+#endif	
+			nvtxRangePushA("FFT backward phi");	
 			plan_phi.execute(FFT_BACKWARD);	 // go back to position space
+			nvtxRangePop();
 #ifdef BENCHMARK
 			fft_time += MPI_Wtime() - ref2_time;
 			fft_count++;
 #endif	
 		}
 
+		nvtxRangePushA("Update halo phi");
 		phi.updateHalo();  // communicate halo values
+		nvtxRangePop();
+		nvtxRangePop();
 
 		if (kFT.setCoord(0, 0, 0))
 			phi_hom = scalarFT(kFT).real();
 		
-		prepareFTsource<Real>(phi, Sij, Sij, 2. * fourpiG * dx * dx / a);  // prepare nonlinear source for additional equations
+		nvtxRangePushA("Solve chi");
+		nvtxRangePushA("prepareFTsource");
+		prepareFTsource(phi, Sij, Sij, 2. * fourpiG * dx * dx / a);  // prepare nonlinear source for additional equations
+		nvtxRangePop();
 
 #ifdef BENCHMARK
 		ref2_time= MPI_Wtime();
 #endif		
+		nvtxRangePushA("FFT forward Sij");
 		plan_Sij.execute(FFT_FORWARD);  // go to k-space
+		nvtxRangePop();
 #ifdef BENCHMARK
 		fft_time += MPI_Wtime() - ref2_time;
 		fft_count += 6;
 #endif
 
+		nvtxRangePushA("projectFTscalar");
 #ifdef HAVE_CLASS
 		if (sim.radiation_flag > 0 && a < 1. / (sim.z_switch_linearchi + 1.))
 		{
@@ -673,52 +712,78 @@ int main(int argc, char **argv)
 		else
 #endif		
 		projectFTscalar(SijFT, scalarFT);  // construct chi by scalar projection (k-space)
+		nvtxRangePop();
 
 #ifdef BENCHMARK
 		ref2_time= MPI_Wtime();
-#endif		
+#endif	
+		nvtxRangePushA("FFT backward chi");
 		plan_chi.execute(FFT_BACKWARD);	 // go back to position space
+		nvtxRangePop();
 #ifdef BENCHMARK
 		fft_time += MPI_Wtime() - ref2_time;
 		fft_count++;
 #endif	
+		nvtxRangePushA("Update halo chi");
 		chi.updateHalo();  // communicate halo values
+		nvtxRangePop();
+		nvtxRangePop();
 
+		nvtxRangePushA("Solve B (k-space)");
 		if (sim.vector_flag == VECTOR_ELLIPTIC)
 		{
 #ifdef BENCHMARK
 			ref2_time= MPI_Wtime();
 #endif
+			nvtxRangePushA("FFT forward T0i");
 			plan_Bi.execute(FFT_FORWARD);
+			nvtxRangePop();
 #ifdef BENCHMARK
 			fft_time += MPI_Wtime() - ref2_time;
 			fft_count += 3;
 #endif
+			nvtxRangePushA("projectFTvector");
 			projectFTvector(BiFT, BiFT, fourpiG * dx * dx); // solve B using elliptic constraint (k-space)
+			nvtxRangePop();
 #ifdef CHECK_B
-			evolveFTvector(SijFT, BiFT_check, a * a * dtau_old); 
+			nvtxRangePushA("evolveFTvector (check)");
+			evolveFTvector(SijFT, BiFT_check, a * a * dtau_old);
+			nvtxRangePop();
 #endif
 		}
 		else
+		{
+			nvtxRangePushA("evolveFTvector");
 			evolveFTvector(SijFT, BiFT, a * a * dtau_old);  // evolve B using vector projection (k-space)
+			nvtxRangePop();
+		}
+		nvtxRangePop();
 
 		if (sim.gr_flag > 0)
 		{
+			nvtxRangePushA("Solve B (position space)");
 #ifdef BENCHMARK
 			ref2_time= MPI_Wtime();
-#endif				
+#endif		
+			nvtxRangePushA("FFT backward B");	
 			plan_Bi.execute(FFT_BACKWARD);  // go back to position space
+			nvtxRangePop();
 #ifdef BENCHMARK
 			fft_time += MPI_Wtime() - ref2_time;
 			fft_count += 3;
 #endif
+			nvtxRangePushA("Update halo B");
 			Bi.updateHalo();  // communicate halo values
+			nvtxRangePop();
+			nvtxRangePop();
 
 #ifdef TENSOR_EVOLUTION
+			nvtxRangePushA("Solve hij (k-space)");
 			if (cycle == 0)
 				projectFTtensor(SijFT, hijFT);
 			else
 				evolveFTtensor(SijFT, hijFT, hijprimeFT, Hconf(a, fourpiG, cosmo), dtau, dtau_old);
+			nvtxRangePop();
 #endif
 
 #ifdef ANISOTROPIC_EXPANSION
@@ -791,9 +856,11 @@ int main(int argc, char **argv)
 		// done recording background data
 
 		// lightcone output
+		nvtxRangePushA("Lightcone output");
 		if (sim.num_lightcone > 0)
 			writeLightcones(sim, cosmo, fourpiG, a, tau, dtau, dtau_old, maxvel[0], cycle, h5filename + sim.basename_lightcone, &pcls_cdm, &pcls_b, pcls_ncdm, &phi, &chi, &Bi, &Sij, &BiFT, &SijFT, &plan_Bi, &plan_Sij, done_hij, IDbacklog);
 		else done_hij = 0;
+		nvtxRangePop();
 
 #ifdef BENCHMARK
 		lightcone_output_time += MPI_Wtime() - ref_time;
@@ -803,6 +870,7 @@ int main(int argc, char **argv)
 		// snapshot output
 		if (snapcount < sim.num_snapshot && 1. / a < sim.z_snapshot[snapcount] + 1.)
 		{
+			nvtxRangePushA("Snapshot output");
 			COUT << COLORTEXT_CYAN << " writing snapshot" << COLORTEXT_RESET << " at z = " << ((1./a) - 1.) <<  " (cycle " << cycle << "), tau/boxsize = " << tau << endl;
 
 			writeSnapshots(sim, cosmo, fourpiG, a, dtau_old, done_hij, snapcount, h5filename + sim.basename_snapshot, &pcls_cdm, &pcls_b, pcls_ncdm, &phi, &chi, &Bi, &source, &Sij, &scalarFT, &BiFT, &SijFT, &plan_phi, &plan_chi, &plan_Bi, &plan_source, &plan_Sij
@@ -815,6 +883,7 @@ int main(int argc, char **argv)
 			);
 
 			snapcount++;
+			nvtxRangePop();
 		}
 		
 #ifdef BENCHMARK
@@ -825,6 +894,7 @@ int main(int argc, char **argv)
 		// power spectra
 		if (pkcount < sim.num_pk && 1. / a < sim.z_pk[pkcount] + 1.)
 		{
+			nvtxRangePushA("Power spectrum output");
 			COUT << COLORTEXT_CYAN << " writing power spectra" << COLORTEXT_RESET << " at z = " << ((1./a) - 1.) <<  " (cycle " << cycle << "), tau/boxsize = " << tau << endl;
 
 			writeSpectra(sim, cosmo, fourpiG, a, pkcount,
@@ -844,6 +914,7 @@ int main(int argc, char **argv)
 			);
 
 			pkcount++;
+			nvtxRangePop();
 		}
 
 #ifdef EXACT_OUTPUT_REDSHIFTS
@@ -853,6 +924,7 @@ int main(int argc, char **argv)
 
 		if (pkcount < sim.num_pk && 1. / tmp < sim.z_pk[pkcount] + 1.)
 		{
+			nvtxRangePushA("Power spectrum output (exact redshifts)");
 			writeSpectra(sim, cosmo, fourpiG, a, pkcount,
 #ifdef HAVE_CLASS
 				class_background, class_perturbs, ic,
@@ -868,6 +940,7 @@ int main(int argc, char **argv)
 				, &hijFT, &hijprimeFT
 #endif
 			);
+			nvtxRangePop();
 		}
 #endif // EXACT_OUTPUT_REDSHIFTS
 		
@@ -920,6 +993,7 @@ int main(int argc, char **argv)
 			COUT << endl;
 		}
 
+		nvtxRangePushA("Particle update: ncdm species");
 #ifdef BENCHMARK
 		ref2_time = MPI_Wtime();
 #endif
@@ -960,8 +1034,10 @@ int main(int argc, char **argv)
 				rungekutta4bg(tmp, fourpiG, cosmo, 0.5 * dtau / numsteps_ncdm[i]);
 			}
 		}
+		nvtxRangePop();
 
 		// cdm and baryon particle update
+		nvtxRangePushA("Particle update: cdm and baryons, kick step");
 		f_params[0] = a;
 		f_params[1] = a * a * sim.numpts;
 		if (sim.gr_flag > 0)
@@ -976,6 +1052,7 @@ int main(int argc, char **argv)
 			if (sim.baryon_flag)
 				maxvel[1] = pcls_b.updateVel(update_q_Newton_functor(), (dtau + dtau_old) / 2., update_b_fields, ((sim.radiation_flag + sim.fluid_flag > 0 && a < 1. / (sim.z_switch_linearchi + 1.)) ? 2 : 1), f_params);
 		}
+		nvtxRangePop();
 
 #ifdef BENCHMARK
 		update_q_count++;
@@ -985,6 +1062,7 @@ int main(int argc, char **argv)
 				
 		rungekutta4bg(a, fourpiG, cosmo, 0.5 * dtau);  // evolve background by half a time step
 
+		nvtxRangePushA("Particle update: cdm and baryons, drift step");
 		f_params[0] = a;
 		f_params[1] = a * a * sim.numpts;
 		if (sim.gr_flag > 0)
@@ -999,6 +1077,7 @@ int main(int argc, char **argv)
 			if (sim.baryon_flag)
 				pcls_b.moveParticles(update_pos_Newton_functor(), dtau, NULL, 0, f_params);
 		}
+		nvtxRangePop();
 
 #ifdef BENCHMARK
 		moveParts_count++;

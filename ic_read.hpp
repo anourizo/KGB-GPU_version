@@ -716,7 +716,7 @@ void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fou
 			projection_Tij_project(pcls_b, Sij, a, phi);
 		projection_Tij_comm(Sij);
 	
-		prepareFTsource<Real>(*phi, *Sij, *Sij, 2. * fourpiG / a / (double) sim.numpts / (double) sim.numpts);	
+		prepareFTsource(*phi, *Sij, *Sij, 2. * fourpiG / a / (double) sim.numpts / (double) sim.numpts);	
 		plan_Sij->execute(FFT_FORWARD);	
 		projectFTscalar(*SijFT, *scalarFT);
 		plan_chi->execute(FFT_BACKWARD);		

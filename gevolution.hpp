@@ -29,6 +29,8 @@
 #ifndef GEVOLUTION_HEADER
 #define GEVOLUTION_HEADER
 
+#include "lattice_loop.hpp"
+
 #ifndef Cplx
 #define Cplx Imag
 #endif
@@ -55,10 +57,75 @@ using namespace LATfield2;
 // 
 //////////////////////////
 
-template <class FieldType>
-void prepareFTsource(Field<FieldType> & phi, Field<FieldType> & Tij, Field<FieldType> & Sij, const double coeff)
+__host__ __device__ void prepareFTsource_Tij(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
 {
-	Site x(phi.lattice());
+	// 0-0-component:
+	(*fields[0])(sites[0], 0, 0) = 
+#ifdef PHINONLINEAR
+	Real(0.5) * ((*fields[2])(sites[2]+0) - (*fields[2])(sites[2]-0)) * ((*fields[2])(sites[2]+0) - (*fields[2])(sites[2]-0)) +
+#endif
+	(*params) * (*fields[1])(sites[1], 0, 0);
+
+	// 1-1-component:
+	(*fields[0])(sites[0], 1, 1) =
+#ifdef PHINONLINEAR
+	Real(0.5) * ((*fields[2])(sites[2]+1) - (*fields[2])(sites[2]-1)) * ((*fields[2])(sites[2]+1) - (*fields[2])(sites[2]-1)) +
+#endif
+	(*params) * (*fields[1])(sites[1], 1, 1);
+
+	// 2-2-component:
+	(*fields[0])(sites[0], 2, 2) =
+#ifdef PHINONLINEAR
+	Real(0.5) * ((*fields[2])(sites[2]+2) - (*fields[2])(sites[2]-2)) * ((*fields[2])(sites[2]+2) - (*fields[2])(sites[2]-2)) +
+#endif
+	(*params) * (*fields[1])(sites[1], 2, 2);
+
+	// 0-1-component:
+	(*fields[0])(sites[0], 0, 1) =
+#ifdef PHINONLINEAR
+	(*fields[2])(sites[2]+0) * (*fields[2])(sites[2]+1) - (*fields[2])(sites[2]) * (*fields[2])(sites[2]+0+1) + Real(0.5) * ((*fields[2])(sites[2]) * (*fields[2])(sites[2]) - (*fields[2])(sites[2]+0) * (*fields[2])(sites[2]+0) - (*fields[2])(sites[2]+1) * (*fields[2])(sites[2]+1) + (*fields[2])(sites[2]+0+1) * (*fields[2])(sites[2]+0+1)) +
+#endif
+	(*params) * (*fields[1])(sites[1], 0, 1);
+
+	// 0-2-component:
+	(*fields[0])(sites[0], 0, 2) =
+#ifdef PHINONLINEAR
+	(*fields[2])(sites[2]+0) * (*fields[2])(sites[2]+2) - (*fields[2])(sites[2]) * (*fields[2])(sites[2]+0+2) + Real(0.5) * ((*fields[2])(sites[2]) * (*fields[2])(sites[2]) - (*fields[2])(sites[2]+0) * (*fields[2])(sites[2]+0) - (*fields[2])(sites[2]+2) * (*fields[2])(sites[2]+2) + (*fields[2])(sites[2]+0+2) * (*fields[2])(sites[2]+0+2)) +
+#endif
+	(*params) * (*fields[1])(sites[1], 0, 2);
+
+	// 1-2-component:
+	(*fields[0])(sites[0], 1, 2) =
+#ifdef PHINONLINEAR
+	(*fields[2])(sites[2]+1) * (*fields[2])(sites[2]+2) - (*fields[2])(sites[2]) * (*fields[2])(sites[2]+1+2) + Real(0.5) * ((*fields[2])(sites[2]) * (*fields[2])(sites[2]) - (*fields[2])(sites[2]+1) * (*fields[2])(sites[2]+1) - (*fields[2])(sites[2]+2) * (*fields[2])(sites[2]+2) + (*fields[2])(sites[2]+1+2) * (*fields[2])(sites[2]+1+2)) +
+#endif
+	(*params) * (*fields[1])(sites[1], 1, 2);
+}
+
+// callable struct for prepareFTsource_Tij
+
+struct prepareFTsource_Tij_functor
+{
+	__host__ __device__ void operator()(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+	{
+		prepareFTsource_Tij(fields, sites, nfields, params, outputs);
+	}
+};
+
+void prepareFTsource(Field<Real> & phi, Field<Real> & Tij, Field<Real> & Sij, const double coeff)
+{
+	Field<Real> * fields[3] = {&Sij, &Tij, &phi};
+	double params = coeff;
+
+	int numpts = phi.lattice().sizeLocal(0);
+	int block_x = phi.lattice().sizeLocal(1);
+	int block_y = phi.lattice().sizeLocal(2);
+
+	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepareFTsource_Tij_functor(), numpts, fields, 3, &params, nullptr, nullptr, 0);
+
+	cudaDeviceSynchronize();
+
+/*	Site x(phi.lattice());
 	
 	for (x.first(); x.test(); x.next())
 	{
@@ -145,7 +212,7 @@ void prepareFTsource(Field<FieldType> & phi, Field<FieldType> & Tij, Field<Field
 		Sij(x, 1, 2) += 0.5 * phi(x+1+2) * phi(x+1+2);
 #endif
 #endif
-	}
+	}*/
 }
 
 //////////////////////////
@@ -168,10 +235,42 @@ void prepareFTsource(Field<FieldType> & phi, Field<FieldType> & Tij, Field<Field
 // 
 //////////////////////////
 
-template <class FieldType>
-void prepareFTsource(Field<FieldType> & phi, Field<FieldType> & chi, Field<FieldType> & source, const FieldType bgmodel, Field<FieldType> & result, const double coeff, const double coeff2, const double coeff3)
+__host__ __device__ void prepareFTsource_T00(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
 {
-	Site x(phi.lattice());
+	(*fields[0])(sites[0]) = params[2] * ((*fields[1])(sites[1]) - params[0]);
+#ifdef PHINONLINEAR
+	(*fields[0])(sites[0]) *= Real(1) - Real(2) * (*fields[2])(sites[2]) * (Real(1) - (*fields[2])(sites[2]));
+	(*fields[0])(sites[0]) += Real(0.125) * ((*fields[2])(sites[2]-0) - (*fields[2])(sites[2]+0)) * ((*fields[2])(sites[2]-0) - (*fields[2])(sites[2]+0));
+	(*fields[0])(sites[0]) += Real(0.125) * ((*fields[2])(sites[2]-1) - (*fields[2])(sites[2]+1)) * ((*fields[2])(sites[2]-1) - (*fields[2])(sites[2]+1));
+	(*fields[0])(sites[0]) += Real(0.125) * ((*fields[2])(sites[2]-2) - (*fields[2])(sites[2]+2)) * ((*fields[2])(sites[2]-2) - (*fields[2])(sites[2]+2));
+#endif
+	(*fields[0])(sites[0]) += (params[3] * (Real(1) - Real(3) * (*fields[2])(sites[2])) - params[1]) * (*fields[2])(sites[2]) - params[3] * (*fields[3])(sites[3]);
+}
+
+// callable struct for prepareFTsource_T00
+
+struct prepareFTsource_T00_functor
+{
+	__host__ __device__ void operator()(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+	{
+		prepareFTsource_T00(fields, sites, nfields, params, outputs);
+	}
+};
+
+void prepareFTsource(Field<Real> & phi, Field<Real> & chi, Field<Real> & source, const double bgmodel, Field<Real> & result, const double coeff, const double coeff2, const double coeff3)
+{
+	Field<Real> * fields[4] = {&result, &source, &phi, &chi};
+	double params[4] = {bgmodel, coeff, coeff2, coeff3};
+
+	int numpts = result.lattice().sizeLocal(0);
+	int block_x = result.lattice().sizeLocal(1);
+	int block_y = result.lattice().sizeLocal(2);
+
+	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepareFTsource_T00_functor(), numpts, fields, 4, params, nullptr, nullptr, 0);
+
+	cudaDeviceSynchronize();
+
+/*	Site x(phi.lattice());
 	
 	for (x.first(); x.test(); x.next())
 	{
@@ -190,10 +289,11 @@ void prepareFTsource(Field<FieldType> & phi, Field<FieldType> & chi, Field<Field
 #endif
 #endif
 		result(x) += (coeff3 * (1. - 3. * phi(x)) - coeff) * phi(x) - coeff3 * chi(x);
-	}
+	}*/
 }
 
-template <class FieldType>
+
+/*template <class FieldType>
 void prepareFTsource(Field<FieldType> & T0i, Field<FieldType> & phi, const double coeff)
 {
 	Site x(phi.lattice());
@@ -204,7 +304,7 @@ void prepareFTsource(Field<FieldType> & T0i, Field<FieldType> & phi, const doubl
 		T0i(x,1) *= (1. - 0.5 * (phi(x) + phi(x+1)));
 		T0i(x,2) *= (1. - 0.5 * (phi(x) + phi(x+2)));
 	}
-}
+}*/
 
 #ifdef FFT3D
 //////////////////////////

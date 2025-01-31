@@ -446,6 +446,8 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 	{
 		throw std::runtime_error("Error allocating memory for particle buffers");
 	}
+
+	nvtxRangePushA("count particles to be written");
 	
 	npart = 0;
 #pragma omp parallel for
@@ -463,6 +465,8 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 	{
 		throw std::runtime_error("CUDA error in count_tracer_particles");
 	}
+
+	nvtxRangePop();
 
 	if (hdr.num_files == 1)
 	{	
@@ -540,6 +544,7 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 			
 			if (count > 0)
 			{
+				nvtxRangePushA("buffer particles");
 				buffer_count = 0;
 
 				buffer_tracer_particles<<<row_count, 128>>>(this, tracer_factor, dtau_pos, dtau_vel, hdr.time, hdr.BoxSize, phi, posdata, veldata, IDs, row_start, &buffer_count);
@@ -550,7 +555,9 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 				{
 					throw std::runtime_error("CUDA error in buffer_tracer_particles");
 				}
+				nvtxRangePop();
 
+				nvtxRangePushA("write particles to disk");
 				MPI_File_write_at(outfile, offset_pos, posdata, 3 * buffer_count, MPI_FLOAT, &status);
 				offset_pos += 3 * buffer_count * sizeof(float);
 				MPI_File_write_at(outfile, offset_vel, veldata, 3 * buffer_count, MPI_FLOAT, &status);
@@ -558,6 +565,7 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 				buffer_count *= sizeof(int64_t);
 				MPI_File_write_at(outfile, offset_ID, IDs, buffer_count, MPI_BYTE, &status);
 				offset_ID += buffer_count;
+				nvtxRangePop();
 			}
 
 			row_start += row_count;
@@ -606,6 +614,7 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 
 		while (row_start < this->num_row_buffers_)
 		{
+			nvtxRangePushA("buffer particles");
 			count = 0;
 			row_count = 0;
 
@@ -641,7 +650,9 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 			{
 				throw std::runtime_error("CUDA error in buffer_tracer_particles");
 			}
+			nvtxRangePop();
 
+			nvtxRangePushA("write particles to disk");
 			fseek(outfile, offset_pos, SEEK_SET);
 			fwrite(posdata, 3 * buffer_count, sizeof(float), outfile);
 			offset_pos += 3 * buffer_count * sizeof(float);
@@ -652,6 +663,7 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 			fseek(outfile, offset_ID, SEEK_SET);
 			fwrite(IDs, buffer_count, 1, outfile);
 			offset_ID += buffer_count;
+			nvtxRangePop();
 
 			row_start += row_count;
 		}
@@ -1222,6 +1234,8 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 		throw std::runtime_error("Error allocating memory for particle IDs");
 	}
 
+	nvtxRangePushA("count particles to be written");
+
 	npart = 0;
 #pragma omp parallel for
 	for (int row = 0; row < this->num_row_buffers_; row++)
@@ -1316,6 +1330,8 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 	parallel.broadcast<uint32_t>(hdr.npartTotal[1], 0);
 	parallel.broadcast<uint32_t>(hdr.npartTotalHW[1], 0);
 
+	nvtxRangePop();
+
 	if (hdr.npartTotal[1] + ((int64_t) hdr.npartTotalHW[1] << 32) > 0)
 	{
 		MPI_File_open(parallel.lat_world_comm(), filename.c_str(), MPI_MODE_WRONLY | MPI_MODE_CREATE,  MPI_INFO_NULL, &outfile);
@@ -1359,6 +1375,7 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 
 		while (row_start < this->num_row_buffers_)
 		{
+			nvtxRangePushA("buffer particles");
 			count = 0;
 			row_count = 0;
 			buffer_count2 = 0;
@@ -1448,7 +1465,9 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 					}
 				}
 			}
+			nvtxRangePop();
 
+			nvtxRangePushA("write particles to disk");
 			if (count > 0)
 			{
 				// fill the IDprelogs
@@ -1472,6 +1491,7 @@ void perfParticles_gevolution<part,part_info>::saveGadget2(string filename, gadg
 				MPI_File_write_at(outfile, offset_ID, IDs, count, MPI_BYTE, &status);
 				offset_ID += count;
 			}
+			nvtxRangePop();
 
 			row_start += row_count;
 		}

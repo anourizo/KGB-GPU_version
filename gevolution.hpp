@@ -1325,7 +1325,125 @@ void projection_T00_project(Particles<part, part_info, part_dataType> * pcls, Fi
 	}  
 }
 
-#define projection_T00_comm scalarProjectionCIC_comm
+__global__ void projection_T00_comm_localhalo(Field<Real> * T00, long sizeLocalGross[3], int halo)
+{
+	long k = blockIdx.x + halo - 1;
+	
+	for (long j = threadIdx.x + halo - 1; j < sizeLocalGross[1] - halo + 1; j += 128)
+	{
+		(*T00)(static_cast<long>(halo) + sizeLocalGross[0] * (j + sizeLocalGross[1] * k)) += (*T00)(static_cast<long>(-halo) + sizeLocalGross[0] * (1L + j + sizeLocalGross[1] * k));		
+	}
+}
+
+__global__ void projection_T00_comm_pack_y(Field<Real> * T00, long sizeLocalGross[3], int halo, Real * buffer)
+{
+	long k = blockIdx.x;
+
+	for (long i = threadIdx.x; i < sizeLocalGross[0] - 2*halo; i += 128)
+	{
+		buffer[k * (sizeLocalGross[0] - 2*halo) + i] = (*T00)(halo + i + sizeLocalGross[0] * (sizeLocalGross[1] * (k + halo + 1) - halo));
+	}	
+}
+
+__global__ void projection_T00_comm_unpack_y(Field<Real> * T00, long sizeLocalGross[3], int halo, Real * buffer)
+{
+	long k = blockIdx.x;
+
+	for (long i = threadIdx.x; i < sizeLocalGross[0] - 2*halo; i += 128)
+	{
+		(*T00)(halo + i + sizeLocalGross[0] * (sizeLocalGross[1] * (k + halo) + halo)) += buffer[k * (sizeLocalGross[0] - 2*halo) + i];
+	}
+}
+
+__global__ void projection_T00_comm_pack_z(Field<Real> * T00, long sizeLocalGross[3], int halo, Real * buffer)
+{
+	long j = blockIdx.x;
+
+	for (long i = threadIdx.x; i < sizeLocalGross[0] - 2*halo; i += 128)
+	{
+		buffer[j * (sizeLocalGross[0] - 2*halo) + i] = (*T00)(halo + i + sizeLocalGross[0] * (j + halo + sizeLocalGross[1] * (sizeLocalGross[2] - halo)));
+	}
+}
+
+__global__ void projection_T00_comm_unpack_z(Field<Real> * T00, long sizeLocalGross[3], int halo, Real * buffer)
+{
+	long j = blockIdx.x;
+
+	for (long i = threadIdx.x; i < sizeLocalGross[0] - 2*halo; i += 128)
+	{
+		(*T00)(halo + i + sizeLocalGross[0] * (j + halo + sizeLocalGross[1] * halo)) += buffer[j * (sizeLocalGross[0] - 2*halo) + i];
+	}
+}
+
+void projection_T00_comm(Field<Real> * T00)
+{
+	int sizeLocal[3] = {T00->lattice().sizeLocal(0), T00->lattice().sizeLocal(1), T00->lattice().sizeLocal(2)};
+	int halo = T00->lattice().halo();
+	long sizeLocalGross[3] = {sizeLocal[0]+2*halo, sizeLocal[1]+2*halo, sizeLocal[2]+2*halo};
+	
+	long buffer_size_y = static_cast<long>(sizeLocal[2]+1) * static_cast<long>(sizeLocal[0]);
+	long buffer_size_z = static_cast<long>(sizeLocal[1]) * static_cast<long>(sizeLocal[0]);
+	long buffer_size = buffer_size_y>buffer_size_z ? buffer_size_y : buffer_size_z;
+
+	Real * buffer = (Real*) malloc(2*sizeof(Real)*buffer_size);
+	Real * rec_buffer = buffer + buffer_size;
+
+	projection_T00_comm_localhalo<<<sizeLocal[2]+2, 128>>>(T00, sizeLocalGross, halo);
+
+	auto success = cudaDeviceSynchronize();
+
+	if (success != cudaSuccess)
+	{
+		std::cerr << "Error in projection_T00_comm_localhalo: " << cudaGetErrorString(success) << endl;
+		throw std::runtime_error("Error in projection_T00_comm_localhalo");
+	}
+
+	projection_T00_comm_pack_y<<<sizeLocal[2]+1, 128>>>(T00, sizeLocalGross, halo, buffer);
+
+	success = cudaDeviceSynchronize();
+
+	if (success != cudaSuccess)
+	{
+		std::cerr << "Error in projection_T00_comm_pack_y: " << cudaGetErrorString(success) << endl;
+		throw std::runtime_error("Error in projection_T00_comm_pack_y");
+	}
+
+	parallel.sendUp_dim1(buffer, rec_buffer, buffer_size_y);
+
+	projection_T00_comm_unpack_y<<<sizeLocal[2]+1, 128>>>(T00, sizeLocalGross, halo, rec_buffer);
+
+	success = cudaDeviceSynchronize();
+
+	if (success != cudaSuccess)
+	{
+		std::cerr << "Error in projection_T00_comm_unpack_y: " << cudaGetErrorString(success) << endl;
+		throw std::runtime_error("Error in projection_T00_comm_unpack_y");
+	}
+
+	projection_T00_comm_pack_z<<<sizeLocal[1], 128>>>(T00, sizeLocalGross, halo, buffer);
+
+	success = cudaDeviceSynchronize();
+
+	if (success != cudaSuccess)
+	{
+		std::cerr << "Error in projection_T00_comm_pack_z: " << cudaGetErrorString(success) << endl;
+		throw std::runtime_error("Error in projection_T00_comm_pack_z");
+	}
+
+	parallel.sendUp_dim0(buffer, rec_buffer, buffer_size_z);
+
+	projection_T00_comm_unpack_z<<<sizeLocal[1], 128>>>(T00, sizeLocalGross, halo, rec_buffer);
+
+	success = cudaDeviceSynchronize();
+
+	if (success != cudaSuccess)
+	{
+		std::cerr << "Error in projection_T00_comm_unpack_z: " << cudaGetErrorString(success) << endl;
+		throw std::runtime_error("Error in projection_T00_comm_unpack_z");
+	}
+
+	free(buffer);
+}
 
 
 __host__ __device__ void particle_T00_project(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)

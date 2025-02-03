@@ -264,7 +264,7 @@ int main(int argc, char **argv)
     }
     end = std::chrono::high_resolution_clock::now();
     nvtxRangePop();
-    scalarProjectionCIC_comm(&density_new);
+    projection_T00_comm(&density_new);
     auto benchmark_new = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
     // compare the results
@@ -314,7 +314,7 @@ int main(int argc, char **argv)
 
     projection_init(&density_new);
     particles_new.meshprojection_project(&density_new);
-    scalarProjectionCIC_comm(&density_new);
+    projection_T00_comm(&density_new);
 
     for (x.first(); x.test(); x.next())
     {
@@ -532,7 +532,7 @@ int main(int argc, char **argv)
         projection_init(&density_new);
         //particles_new.meshprojection_project(&density_new);
         projection_T00_project(&particles_new, &density_new, 1, &potential);
-        scalarProjectionCIC_comm(&density_new);
+        projection_T00_comm(&density_new);
         maxvel_new = particles_new.updateVel(kick_function_struct(), 0.005, potentials, 1);
         COUT << ", " << maxvel_new;
         particles_new.moveParticles([]__host__ __device__(double dt, double dx, part_simple* pcl,double * ref_dist, part_simple_info info, Field<Real> ** fields, Site * sites, int nf, double* param, double* out, int nout) { for (int l = 0; l < 3; l++) pcl->pos[l] += dt*pcl->vel[l]; }, 0.1);

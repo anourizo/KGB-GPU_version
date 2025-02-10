@@ -340,16 +340,39 @@ void projectFTscalar(Field<Cplx> & SijFT, Field<Cplx> & chiFT, const int add = 0
 		gridk2[i] *= gridk2[i];
 	}
 
-	k.first();
+	/*k.first();
 	if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
 	{
 		chiFT(k) = Cplx(0,0);
 		k.next();
-	}
+	}*/
 	
 	if (add)
 	{
-		for (; k.test(); k.next())
+#pragma omp parallel for collapse(2) default(shared) private(k)
+		for (int i = 0; i < chiFT.lattice().sizeLocal(1); i++)
+		{
+			for (int j = 0; j < chiFT.lattice().sizeLocal(2); j++)
+			{
+				if (!k.setCoord(0, i + chiFT.lattice().coordSkip()[1], j + chiFT.lattice().coordSkip()[0]))
+				{
+					throw std::runtime_error("Error in projectFTscalar: Could not set coordinates.");
+				}
+
+				for (int z = 0; z < chiFT.lattice().sizeLocal(0); z++)
+				{
+					chiFT(k) += ((gridk2[k.coord(1)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(0)]) * SijFT(k, 0, 0) +
+						(gridk2[k.coord(0)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(1)]) * SijFT(k, 1, 1) +
+						(gridk2[k.coord(0)] + gridk2[k.coord(1)] - Real(2) * gridk2[k.coord(2)]) * SijFT(k, 2, 2) -
+						Real(6) * kshift[k.coord(0)] * kshift[k.coord(1)] * SijFT(k, 0, 1) -
+						Real(6) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2) -
+						Real(6) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2)) /
+						(Real(2) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * linesize);
+					k.next();
+				}
+			}
+		}
+		/*for (; k.test(); k.next())
 		{
 			chiFT(k) += ((gridk2[k.coord(1)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(0)]) * SijFT(k, 0, 0) +
 						(gridk2[k.coord(0)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(1)]) * SijFT(k, 1, 1) +
@@ -358,11 +381,34 @@ void projectFTscalar(Field<Cplx> & SijFT, Field<Cplx> & chiFT, const int add = 0
 						Real(6) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2) -
 						Real(6) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2)) /
 						(Real(2) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * linesize);
-		}
+		}*/
 	}
 	else
 	{
-		for (; k.test(); k.next())
+#pragma omp parallel for collapse(2) default(shared) private(k)
+		for (int i = 0; i < chiFT.lattice().sizeLocal(1); i++)
+		{
+			for (int j = 0; j < chiFT.lattice().sizeLocal(2); j++)
+			{
+				if (!k.setCoord(0, i + chiFT.lattice().coordSkip()[1], j + chiFT.lattice().coordSkip()[0]))
+				{
+					throw std::runtime_error("Error in projectFTscalar: Could not set coordinates.");
+				}
+
+				for (int z = 0; z < chiFT.lattice().sizeLocal(0); z++)
+				{
+					chiFT(k) = ((gridk2[k.coord(1)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(0)]) * SijFT(k, 0, 0) +
+						(gridk2[k.coord(0)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(1)]) * SijFT(k, 1, 1) +
+						(gridk2[k.coord(0)] + gridk2[k.coord(1)] - Real(2) * gridk2[k.coord(2)]) * SijFT(k, 2, 2) -
+						Real(6) * kshift[k.coord(0)] * kshift[k.coord(1)] * SijFT(k, 0, 1) -
+						Real(6) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2) -
+						Real(6) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2)) /
+						(Real(2) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * linesize);
+					k.next();
+				}
+			}
+		}
+		/*for (; k.test(); k.next())
 		{
 			chiFT(k) = ((gridk2[k.coord(1)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(0)]) * SijFT(k, 0, 0) +
 						(gridk2[k.coord(0)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(1)]) * SijFT(k, 1, 1) +
@@ -371,7 +417,12 @@ void projectFTscalar(Field<Cplx> & SijFT, Field<Cplx> & chiFT, const int add = 0
 						Real(6) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2) -
 						Real(6) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2)) /
 						(Real(2) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * linesize);
-		}
+		}*/
+	}
+
+	if (k.setCoord(0,0,0))
+	{
+		chiFT(k) = Cplx(0,0);
 	}
 	
 	free(gridk2);
@@ -758,8 +809,31 @@ void solveModifiedPoissonFT(Field<Cplx> & sourceFT, Field<Cplx> & potFT, Real co
 		gridk2[i] = Real(2) * (Real) linesize * sin(M_PI * (Real) i / (Real) linesize);
 		gridk2[i] *= gridk2[i];
 	}
+
+#pragma omp parallel for collapse(2) default(shared) private(k)
+	for (int i = 0; i < potFT.lattice().sizeLocal(1); i++)
+	{
+		for (int j = 0; j < potFT.lattice().sizeLocal(2); j++)
+		{
+			if (!k.setCoord(0, i + potFT.lattice().coordSkip()[1], j + potFT.lattice().coordSkip()[0]))
+			{
+				throw std::runtime_error("Error in solveModifiedPoissonFT: Could not set coordinates.");
+			}
+
+			for (int z = 0; z < potFT.lattice().sizeLocal(0); z++)
+			{
+				potFT(k) = sourceFT(k) * coeff / (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)] + modif);
+				k.next();
+			}
+		}
+	}
+
+	if (modif == 0 && k.setCoord(0, 0, 0))
+	{
+		potFT(k) = Cplx(0,0);
+	}
 	
-	k.first();
+	/*k.first();
 	if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
 	{
 		if (modif == 0)
@@ -772,7 +846,7 @@ void solveModifiedPoissonFT(Field<Cplx> & sourceFT, Field<Cplx> & potFT, Real co
 	for (; k.test(); k.next())
 	{
 		potFT(k) = sourceFT(k) * coeff / (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)] + modif);
-	}
+	}*/
 	
 	free(gridk2);
 }

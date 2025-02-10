@@ -253,6 +253,8 @@ int main(int argc, char **argv)
 	Field<Real> * update_cdm_fields[3];
 	Field<Real> * update_b_fields[3];
 	Field<Real> * update_ncdm_fields[3];
+	Field<Real> * project_Tij_fields[2];
+	Field<Real> * project_T0i_fields[2];
 	double f_params[7] = {0., 0., 0., 0., 0., 0., 0.};
 	set<long> ** IDbacklog;
 
@@ -317,6 +319,12 @@ int main(int argc, char **argv)
 	update_ncdm_fields[0] = &phi;
 	update_ncdm_fields[1] = &chi;
 	update_ncdm_fields[2] = &Bi;
+
+	project_Tij_fields[0] = &Sij;
+	project_Tij_fields[1] = &phi;
+
+	project_T0i_fields[0] = &Bi;
+	project_T0i_fields[1] = &phi;
 	
 	Site x(lat);
 	rKSite kFT(latFT);
@@ -550,28 +558,13 @@ int main(int argc, char **argv)
             a_old = a;
 		}
 #endif
-
-		if (sim.vector_flag == VECTOR_ELLIPTIC)
-		{
-			nvtxRangePushA("Construct T0i");
-			//projection_init(&Bi);
-			thrust::fill_n(thrust::device, Bi.data(), 3*lat.sitesLocalGross(), Real(0));
-			projection_T0i_project(&pcls_cdm, &Bi, &phi);
-			if (sim.baryon_flag)
-				projection_T0i_project(&pcls_b, &Bi, &phi);
-			for (int i = 0; i < cosmo.num_ncdm; i++)
-			{
-				if (a >= 1. / (sim.z_switch_Bncdm[i] + 1.) && sim.numpcl[1+sim.baryon_flag+i] > 0)
-					projection_T0i_project(pcls_ncdm+i, &Bi, &phi);
-			}
-			projection_T0i_comm(&Bi);
-			nvtxRangePop();
-		}
 		
-		nvtxRangePushA("Construct Tij");
+		nvtxRangePushA("Zero Tij");
 		//projection_init(&Sij);
 		thrust::fill_n(thrust::device, Sij.data(), 6*lat.sitesLocalGross(), Real(0));
-#ifdef ANISOTROPIC_EXPANSION
+		nvtxRangePop();
+
+/*#ifdef ANISOTROPIC_EXPANSION
 		projection_Tij_project(&pcls_cdm, &Sij, a, &phi, 1., hij_hom);
 #else
 		projection_Tij_project(&pcls_cdm, &Sij, a, &phi);
@@ -581,21 +574,25 @@ int main(int argc, char **argv)
 			projection_Tij_project(&pcls_b, &Sij, a, &phi, 1., hij_hom);
 #else
 			projection_Tij_project(&pcls_b, &Sij, a, &phi);
-#endif
+#endif*/
+
 		if (a >= 1. / (sim.z_switch_linearchi + 1.))
 		{
 			for (int i = 0; i < cosmo.num_ncdm; i++)
 			{
 				if (sim.numpcl[1+sim.baryon_flag+i] > 0)
+				{
+					nvtxRangePushA("Tij projection of ncdm particle species");
 #ifdef ANISOTROPIC_EXPANSION
 					projection_Tij_project(pcls_ncdm+i, &Sij, a, &phi, 1., hij_hom);
 #else
 					projection_Tij_project(pcls_ncdm+i, &Sij, a, &phi);
 #endif
+					nvtxRangePop();
+				}
 			}
 		}
-		projection_Tij_comm(&Sij);
-		nvtxRangePop();
+		//projection_Tij_comm(&Sij);
 		
 #ifdef BENCHMARK 
 		projection_time += MPI_Wtime() - cycle_start_time;
@@ -604,7 +601,7 @@ int main(int argc, char **argv)
 		
 		nvtxRangePushA("Solve phi");
 		if (sim.gr_flag > 0)
-		{	
+		{
 			T00hom = 0.;
 			for (x.first(); x.test(); x.next())
 				T00hom += source(x);
@@ -621,51 +618,56 @@ int main(int argc, char **argv)
 				nvtxRangePushA("prepareFTsource");
 				prepareFTsource(phi, chi, source, cosmo.Omega_cdm + cosmo.Omega_b + bg_ncdm(a, cosmo), source, 3. * Hconf(a, fourpiG, cosmo) * dx * dx / dtau_old, fourpiG * dx * dx / a, 3. * Hconf(a, fourpiG, cosmo) * Hconf(a, fourpiG, cosmo) * dx * dx);  // prepare nonlinear source for phi update
 				nvtxRangePop();
-
-#ifdef BENCHMARK
-				ref2_time= MPI_Wtime();
-#endif
-				nvtxRangePushA("FFT forward source");
-				plan_source.execute(FFT_FORWARD);  // go to k-space
-				nvtxRangePop();
-#ifdef BENCHMARK
-				fft_time += MPI_Wtime() - ref2_time;
-				fft_count++;
-#endif
-		
-				nvtxRangePushA("solveModifiedPoissonFT");
-				solveModifiedPoissonFT(scalarFT, scalarFT, 1. / (dx * dx), 3. * Hconf(a, fourpiG, cosmo) / dtau_old);  // phi update (k-space)
-				nvtxRangePop();
-
-#ifdef BENCHMARK
-				ref2_time= MPI_Wtime();
-#endif	
-				nvtxRangePushA("FFT backward phi");	
-				plan_phi.execute(FFT_BACKWARD);	 // go back to position space
-				nvtxRangePop();
-#ifdef BENCHMARK
-				fft_time += MPI_Wtime() - ref2_time;
-				fft_count++;
-#endif	
 			}
 		}
-		else
+
+		if (sim.gr_flag == 0 || dtau_old > 0.)
 		{
 #ifdef BENCHMARK
 			ref2_time= MPI_Wtime();
 #endif
 			nvtxRangePushA("FFT forward source");
-			plan_source.execute(FFT_FORWARD);  // Newton: directly go to k-space
+			plan_source.execute(FFT_FORWARD);  // go to k-space
 			nvtxRangePop();
 #ifdef BENCHMARK
 			fft_time += MPI_Wtime() - ref2_time;
 			fft_count++;
 #endif
-		
-			nvtxRangePushA("solveModifiedPoissonFT");
-			solveModifiedPoissonFT(scalarFT, scalarFT, fourpiG / a);  // Newton: phi update (k-space)
-			nvtxRangePop();
+		}
 
+		nvtxRangePushA("offload Tij projection to GPU");
+		f_params[0] = a;
+		f_params[1] = 1.;
+		projection_Tij_project_Async(&pcls_cdm, project_Tij_fields, 2, f_params);
+		if (sim.baryon_flag)
+			projection_Tij_project_Async(&pcls_b, project_Tij_fields, 2, f_params);
+		nvtxRangePop();
+		
+		nvtxRangePushA("solveModifiedPoissonFT");
+		if (sim.gr_flag == 0)
+		{
+			solveModifiedPoissonFT(scalarFT, scalarFT, fourpiG / a);  // Newton: phi update (k-space)
+		}
+		else if (dtau_old > 0.)
+		{
+			solveModifiedPoissonFT(scalarFT, scalarFT, 1. / (dx * dx), 3. * Hconf(a, fourpiG, cosmo) / dtau_old);  // phi update (k-space)
+		}
+		nvtxRangePop();
+
+		nvtxRangePushA("sync and finalize Tij projection");
+		auto success = cudaDeviceSynchronize();
+
+		if (success != cudaSuccess)
+		{
+			std::cerr << "CUDA kernel failed: " << cudaGetErrorString(success) << std::endl;
+        	throw std::runtime_error("Error in CUDA kernel called via projection_Tij_project_Async");
+		}
+
+		projection_Tij_comm(&Sij);
+		nvtxRangePop();
+
+		if (sim.gr_flag == 0 || dtau_old > 0.)
+		{		
 #ifdef BENCHMARK
 			ref2_time= MPI_Wtime();
 #endif	
@@ -676,11 +678,12 @@ int main(int argc, char **argv)
 			fft_time += MPI_Wtime() - ref2_time;
 			fft_count++;
 #endif	
+
+			nvtxRangePushA("Update halo phi");
+			phi.updateHalo();  // communicate halo values
+			nvtxRangePop();
 		}
 
-		nvtxRangePushA("Update halo phi");
-		phi.updateHalo();  // communicate halo values
-		nvtxRangePop();
 		nvtxRangePop();
 
 		if (kFT.setCoord(0, 0, 0))
@@ -702,6 +705,33 @@ int main(int argc, char **argv)
 		fft_count += 6;
 #endif
 
+		if (sim.vector_flag == VECTOR_ELLIPTIC)
+		{
+			nvtxRangePushA("Zero T0i");
+			//projection_init(&Bi);
+			thrust::fill_n(thrust::device, Bi.data(), 3*lat.sitesLocalGross(), Real(0));
+			nvtxRangePop();
+			//projection_T0i_project(&pcls_cdm, &Bi, &phi);
+			//if (sim.baryon_flag)
+			//	projection_T0i_project(&pcls_b, &Bi, &phi);
+			for (int i = 0; i < cosmo.num_ncdm; i++)
+			{
+				if (a >= 1. / (sim.z_switch_Bncdm[i] + 1.) && sim.numpcl[1+sim.baryon_flag+i] > 0)
+				{
+					nvtxRangePushA("T0i projection of ncdm particle species");
+					projection_T0i_project(pcls_ncdm+i, &Bi, &phi);
+					nvtxRangePop();
+				}
+			}
+			//projection_T0i_comm(&Bi);
+			nvtxRangePushA("offload T0i projection to GPU");
+			f_params[0] = 1.;
+			projection_T0i_project_Async(&pcls_cdm, project_T0i_fields, 2, f_params);
+			if (sim.baryon_flag)
+				projection_T0i_project_Async(&pcls_b, project_T0i_fields, 2, f_params);
+			nvtxRangePop();
+		}
+
 		nvtxRangePushA("projectFTscalar");
 #ifdef HAVE_CLASS
 		if (sim.radiation_flag > 0 && a < 1. / (sim.z_switch_linearchi + 1.))
@@ -713,6 +743,21 @@ int main(int argc, char **argv)
 #endif		
 		projectFTscalar(SijFT, scalarFT);  // construct chi by scalar projection (k-space)
 		nvtxRangePop();
+
+		if (sim.vector_flag == VECTOR_ELLIPTIC)
+		{
+			nvtxRangePushA("sync and finalize T0i projection");
+			auto success_T0i = cudaDeviceSynchronize();
+
+			if (success_T0i != cudaSuccess)
+			{
+				std::cerr << "CUDA kernel failed: " << cudaGetErrorString(success_T0i) << std::endl;
+				throw std::runtime_error("Error in CUDA kernel called via projection_T0i_project_Async");
+			}
+
+			projection_T0i_comm(&Bi);
+			nvtxRangePop();
+		}
 
 #ifdef BENCHMARK
 		ref2_time= MPI_Wtime();

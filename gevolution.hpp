@@ -349,12 +349,12 @@ void projectFTscalar(Field<Cplx> & SijFT, Field<Cplx> & chiFT, const int add = 0
 	
 	if (add)
 	{
-#pragma omp parallel for collapse(2) default(shared) private(k)
+#pragma omp parallel for collapse(2) default(shared) firstprivate(k)
 		for (int i = 0; i < chiFT.lattice().sizeLocal(1); i++)
 		{
 			for (int j = 0; j < chiFT.lattice().sizeLocal(2); j++)
 			{
-				if (!k.setCoord(0, i + chiFT.lattice().coordSkip()[1], j + chiFT.lattice().coordSkip()[0]))
+				if (!k.setCoord(0, j + chiFT.lattice().coordSkip()[0], i + chiFT.lattice().coordSkip()[1]))
 				{
 					throw std::runtime_error("Error in projectFTscalar: Could not set coordinates.");
 				}
@@ -385,12 +385,12 @@ void projectFTscalar(Field<Cplx> & SijFT, Field<Cplx> & chiFT, const int add = 0
 	}
 	else
 	{
-#pragma omp parallel for collapse(2) default(shared) private(k)
+#pragma omp parallel for collapse(2) default(shared) firstprivate(k)
 		for (int i = 0; i < chiFT.lattice().sizeLocal(1); i++)
 		{
 			for (int j = 0; j < chiFT.lattice().sizeLocal(2); j++)
 			{
-				if (!k.setCoord(0, i + chiFT.lattice().coordSkip()[1], j + chiFT.lattice().coordSkip()[0]))
+				if (!k.setCoord(0, j + chiFT.lattice().coordSkip()[0], i + chiFT.lattice().coordSkip()[1]))
 				{
 					throw std::runtime_error("Error in projectFTscalar: Could not set coordinates.");
 				}
@@ -810,13 +810,14 @@ void solveModifiedPoissonFT(Field<Cplx> & sourceFT, Field<Cplx> & potFT, Real co
 		gridk2[i] *= gridk2[i];
 	}
 
-#pragma omp parallel for collapse(2) default(shared) private(k)
+#pragma omp parallel for collapse(2) default(shared) firstprivate(k)
 	for (int i = 0; i < potFT.lattice().sizeLocal(1); i++)
 	{
 		for (int j = 0; j < potFT.lattice().sizeLocal(2); j++)
 		{
-			if (!k.setCoord(0, i + potFT.lattice().coordSkip()[1], j + potFT.lattice().coordSkip()[0]))
+			if (!k.setCoord(0, j + potFT.lattice().coordSkip()[0], i + potFT.lattice().coordSkip()[1]))
 			{
+				std::cerr << "proc#" << parallel.rank() << ": Error in solveModifiedPoissonFT! Could not set coordinates at k=(0, " << j + potFT.lattice().coordSkip()[0] << ", " << i + potFT.lattice().coordSkip()[1] << ")" << std::endl;
 				throw std::runtime_error("Error in solveModifiedPoissonFT: Could not set coordinates.");
 			}
 
@@ -2063,6 +2064,11 @@ void projection_T0i_project(perfParticles<part_simple, part_simple_info> * pcls,
 	pcls->projectParticles(particle_T0i_project_functor(), fields, (phi == nullptr ? 1 : 2), &coeff);
 }
 
+void projection_T0i_project_Async(perfParticles<part_simple, part_simple_info> * pcls, Field<Real> ** fields, int nfield, double * params)
+{
+	pcls->projectParticles_Async(particle_T0i_project_functor(), fields, nfield, params);
+}
+
 
 //////////////////////////
 // projection_Tij_project (1)
@@ -2779,6 +2785,11 @@ void projection_Tij_project(perfParticles<part_simple, part_simple_info> * pcls,
 	}
 
 	pcls->projectParticles(particle_Tij_project_functor(), fields, (phi == nullptr ? 1 : 2), params);
+}
+
+void projection_Tij_project_Async(perfParticles<part_simple, part_simple_info> * pcls, Field<Real> ** fields, int nfield, double * params)
+{
+	pcls->projectParticles_Async(particle_Tij_project_functor(), fields, nfield, params);
 }
 
 

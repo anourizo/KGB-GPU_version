@@ -22,7 +22,7 @@
 //
 // Author: Julian Adamek (Université de Genève & Observatoire de Paris & Queen Mary University of London & Universität Zürich)
 //
-// Last modified: January 2025
+// Last modified: February 2025
 //
 //////////////////////////
 
@@ -330,9 +330,18 @@ void projectFTscalar(Field<Cplx> & SijFT, Field<Cplx> & chiFT, const int add = 0
 	Cplx * kshift;
 	rKSite k(chiFT.lattice());
 	
-	gridk2 = (Real *) malloc(linesize * sizeof(Real));
-	kshift = (Cplx *) malloc(linesize * sizeof(Cplx));
+	if (linesize <= STACK_ALLOCATION_LIMIT)
+	{
+		gridk2 = (Real *) alloca(linesize * sizeof(Real));
+		kshift = (Cplx *) alloca(linesize * sizeof(Cplx));
+	}
+	else
+	{
+		gridk2 = (Real *) malloc(linesize * sizeof(Real));
+		kshift = (Cplx *) malloc(linesize * sizeof(Cplx));
+	}
 	
+#pragma omp parallel for
 	for (int i = 0; i < linesize; i++)
 	{
 		gridk2[i] = Real(2) * (Real) linesize * sin(M_PI * (Real) i / (Real) linesize);
@@ -420,13 +429,16 @@ void projectFTscalar(Field<Cplx> & SijFT, Field<Cplx> & chiFT, const int add = 0
 		}*/
 	}
 
-	if (k.setCoord(0,0,0))
+	if (k.setCoord(0, 0, 0))
 	{
 		chiFT(k) = Cplx(0,0);
 	}
 	
-	free(gridk2);
-	free(kshift);
+	if (linesize > STACK_ALLOCATION_LIMIT)
+	{
+		free(gridk2);
+		free(kshift);
+	}
 }
 
 
@@ -454,43 +466,68 @@ void evolveFTvector(Field<Cplx> & SijFT, Field<Cplx> & BiFT, const Real a2dtau)
 	rKSite k(BiFT.lattice());
 	Real k4;
 	
-	gridk2 = (Real *) malloc(linesize * sizeof(Real));
-	kshift = (Cplx *) malloc(linesize * sizeof(Cplx));
-	
+	if (linesize <= STACK_ALLOCATION_LIMIT)
+	{
+		gridk2 = (Real *) alloca(linesize * sizeof(Real));
+		kshift = (Cplx *) alloca(linesize * sizeof(Cplx));
+	}
+	else
+	{
+		gridk2 = (Real *) malloc(linesize * sizeof(Real));
+		kshift = (Cplx *) malloc(linesize * sizeof(Cplx));
+	}
+
+#pragma omp parallel for
 	for (int i = 0; i < linesize; i++)
 	{
 		gridk2[i] = Real(2) * (Real) linesize * sin(M_PI * (Real) i / (Real) linesize);
 		kshift[i] = gridk2[i] * Cplx(cos(M_PI * (Real) i / (Real) linesize), -sin(M_PI * (Real) i / (Real) linesize));
 		gridk2[i] *= gridk2[i];
 	}
+
+#pragma omp parallel for collapse(2) default(shared) firstprivate(k) private(k4)
+	for (int i = 0; i < BiFT.lattice().sizeLocal(1); i++)
+	{
+		for (int j = 0; j < BiFT.lattice().sizeLocal(2); j++)
+		{
+			if (!k.setCoord(0, j + BiFT.lattice().coordSkip()[0], i + BiFT.lattice().coordSkip()[1]))
+			{
+				std::cerr << "proc#" << parallel.rank() << ": Error in projectFTvector! Could not set coordinates at k=(0, " << j + BiFT.lattice().coordSkip()[0] << ", " << i + BiFT.lattice().coordSkip()[1] << ")" << std::endl;
+				throw std::runtime_error("Error in projectFTvector: Could not set coordinates.");
+			}
+
+			for (int z = 0; z < BiFT.lattice().sizeLocal(0); z++)
+			{
+				k4 = gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)];
+				k4 *= k4;
+				
+				BiFT(k, 0) += Cplx(0,Real(-2)*a2dtau/k4) * (kshift[k.coord(0)].conj() * ((gridk2[k.coord(1)] + gridk2[k.coord(2)]) * SijFT(k, 0, 0)
+						- gridk2[k.coord(1)] * SijFT(k, 1, 1) - gridk2[k.coord(2)] * SijFT(k, 2, 2) - Real(2) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2))
+						+ (gridk2[k.coord(1)] + gridk2[k.coord(2)] - gridk2[k.coord(0)]) * (kshift[k.coord(1)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 0, 2)));
+				BiFT(k, 1) += Cplx(0,Real(-2)*a2dtau/k4) * (kshift[k.coord(1)].conj() * ((gridk2[k.coord(0)] + gridk2[k.coord(2)]) * SijFT(k, 1, 1)
+						- gridk2[k.coord(0)] * SijFT(k, 0, 0) - gridk2[k.coord(2)] * SijFT(k, 2, 2) - Real(2) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2))
+						+ (gridk2[k.coord(0)] + gridk2[k.coord(2)] - gridk2[k.coord(1)]) * (kshift[k.coord(0)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 1, 2)));
+				BiFT(k, 2) += Cplx(0,Real(-2)*a2dtau/k4) * (kshift[k.coord(2)].conj() * ((gridk2[k.coord(0)] + gridk2[k.coord(1)]) * SijFT(k, 2, 2)
+						- gridk2[k.coord(0)] * SijFT(k, 0, 0) - gridk2[k.coord(1)] * SijFT(k, 1, 1) - Real(2) * kshift[k.coord(0)] * kshift[k.coord(1)] * SijFT(k, 0, 1))
+						+ (gridk2[k.coord(0)] + gridk2[k.coord(1)] - gridk2[k.coord(2)]) * (kshift[k.coord(0)] * SijFT(k, 0, 2) + kshift[k.coord(1)] * SijFT(k, 1, 2)));
+
+				k.next();
+			}
+		}
+	}
 	
-	k.first();
-	if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
+	if (k.setCoord(0, 0, 0))
 	{
 		BiFT(k, 0) = Cplx(0,0);
 		BiFT(k, 1) = Cplx(0,0);
 		BiFT(k, 2) = Cplx(0,0);
-		k.next();
 	}
 	
-	for (; k.test(); k.next())
+	if (linesize > STACK_ALLOCATION_LIMIT)
 	{
-		k4 = gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)];
-		k4 *= k4;
-		
-		BiFT(k, 0) += Cplx(0,Real(-2)*a2dtau/k4) * (kshift[k.coord(0)].conj() * ((gridk2[k.coord(1)] + gridk2[k.coord(2)]) * SijFT(k, 0, 0)
-				- gridk2[k.coord(1)] * SijFT(k, 1, 1) - gridk2[k.coord(2)] * SijFT(k, 2, 2) - Real(2) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2))
-				+ (gridk2[k.coord(1)] + gridk2[k.coord(2)] - gridk2[k.coord(0)]) * (kshift[k.coord(1)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 0, 2)));
-		BiFT(k, 1) += Cplx(0,Real(-2)*a2dtau/k4) * (kshift[k.coord(1)].conj() * ((gridk2[k.coord(0)] + gridk2[k.coord(2)]) * SijFT(k, 1, 1)
-				- gridk2[k.coord(0)] * SijFT(k, 0, 0) - gridk2[k.coord(2)] * SijFT(k, 2, 2) - Real(2) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2))
-				+ (gridk2[k.coord(0)] + gridk2[k.coord(2)] - gridk2[k.coord(1)]) * (kshift[k.coord(0)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 1, 2)));
-		BiFT(k, 2) += Cplx(0,Real(-2)*a2dtau/k4) * (kshift[k.coord(2)].conj() * ((gridk2[k.coord(0)] + gridk2[k.coord(1)]) * SijFT(k, 2, 2)
-				- gridk2[k.coord(0)] * SijFT(k, 0, 0) - gridk2[k.coord(1)] * SijFT(k, 1, 1) - Real(2) * kshift[k.coord(0)] * kshift[k.coord(1)] * SijFT(k, 0, 1))
-				+ (gridk2[k.coord(0)] + gridk2[k.coord(1)] - gridk2[k.coord(2)]) * (kshift[k.coord(0)] * SijFT(k, 0, 2) + kshift[k.coord(1)] * SijFT(k, 1, 2)));
+		free(gridk2);
+		free(kshift);
 	}
-	
-	free(gridk2);
-	free(kshift);
 }
 
 
@@ -511,47 +548,72 @@ void evolveFTvector(Field<Cplx> & SijFT, Field<Cplx> & BiFT, const Real a2dtau)
 // 
 //////////////////////////
 
-void projectFTvector(Field<Cplx> & SiFT, Field<Cplx> & BiFT, const Real coeff = 1., const Real modif = 0.)
+void projectFTvector(Field<Cplx> & SiFT, Field<Cplx> & BiFT, const Real coeff = 1, const Real modif = 0)
 {
 	const int linesize = BiFT.lattice().size(1);
 	Real * gridk2;
 	Cplx * kshift;
 	rKSite k(BiFT.lattice());
 	Real k2;
-	Cplx tmp(0., 0.);
+	Cplx tmp(0, 0);
 	
-	gridk2 = (Real *) malloc(linesize * sizeof(Real));
-	kshift = (Cplx *) malloc(linesize * sizeof(Cplx));
-	
+	if (linesize <= STACK_ALLOCATION_LIMIT)
+	{
+		gridk2 = (Real *) alloca(linesize * sizeof(Real));
+		kshift = (Cplx *) alloca(linesize * sizeof(Cplx));
+	}
+	else
+	{
+		gridk2 = (Real *) malloc(linesize * sizeof(Real));
+		kshift = (Cplx *) malloc(linesize * sizeof(Cplx));
+	}
+
+#pragma omp parallel for
 	for (int i = 0; i < linesize; i++)
 	{
 		gridk2[i] = Real(2) * (Real) linesize * sin(M_PI * (Real) i / (Real) linesize);
 		kshift[i] = gridk2[i] * Cplx(cos(M_PI * (Real) i / (Real) linesize), -sin(M_PI * (Real) i / (Real) linesize));
 		gridk2[i] *= gridk2[i];
 	}
+
+#pragma omp parallel for collapse(2) default(shared) firstprivate(k) private(k2, tmp)
+	for (int i = 0; i < BiFT.lattice().sizeLocal(1); i++)
+	{
+		for (int j = 0; j < BiFT.lattice().sizeLocal(2); j++)
+		{
+			if (!k.setCoord(0, j + BiFT.lattice().coordSkip()[0], i + BiFT.lattice().coordSkip()[1]))
+			{
+				std::cerr << "proc#" << parallel.rank() << ": Error in projectFTvector! Could not set coordinates at k=(0, " << j + BiFT.lattice().coordSkip()[0] << ", " << i + BiFT.lattice().coordSkip()[1] << ")" << std::endl;
+				throw std::runtime_error("Error in projectFTvector: Could not set coordinates.");
+			}
+
+			for (int z = 0; z < BiFT.lattice().sizeLocal(0); z++)
+			{
+				k2 = gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)];
+		
+				tmp = (kshift[k.coord(0)] * SiFT(k, 0) + kshift[k.coord(1)] * SiFT(k, 1) + kshift[k.coord(2)] * SiFT(k, 2)) / k2;
+				
+				BiFT(k, 0) = (SiFT(k, 0) - kshift[k.coord(0)].conj() * tmp) * Real(4) * coeff / (k2 + modif);
+				BiFT(k, 1) = (SiFT(k, 1) - kshift[k.coord(1)].conj() * tmp) * Real(4) * coeff / (k2 + modif);
+				BiFT(k, 2) = (SiFT(k, 2) - kshift[k.coord(2)].conj() * tmp) * Real(4) * coeff / (k2 + modif);
+
+				k.next();
+			}
+		}
+	}
 	
-	k.first();
-	if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
+	if (k.setCoord(0, 0, 0))
 	{
 		BiFT(k, 0) = Cplx(0,0);
 		BiFT(k, 1) = Cplx(0,0);
 		BiFT(k, 2) = Cplx(0,0);
-		k.next();
 	}
 	
-	for (; k.test(); k.next())
+	if (linesize > STACK_ALLOCATION_LIMIT)
 	{
-		k2 = gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)];
-		
-		tmp = (kshift[k.coord(0)] * SiFT(k, 0) + kshift[k.coord(1)] * SiFT(k, 1) + kshift[k.coord(2)] * SiFT(k, 2)) / k2;
-		
-		BiFT(k, 0) = (SiFT(k, 0) - kshift[k.coord(0)].conj() * tmp) * 4. * coeff / (k2 + modif);
-		BiFT(k, 1) = (SiFT(k, 1) - kshift[k.coord(1)].conj() * tmp) * 4. * coeff / (k2 + modif);
-		BiFT(k, 2) = (SiFT(k, 2) - kshift[k.coord(2)].conj() * tmp) * 4. * coeff / (k2 + modif);
+		free(gridk2);
+		free(kshift);
 	}
-	
-	free(gridk2);
-	free(kshift);
 }
 
 
@@ -584,108 +646,133 @@ void evolveFTtensor(Field<Cplx> & SijFT, Field<Cplx> & hijFT, Field<Cplx> & hijp
 	Real dtau_mean = 0.5 * (dtau_old + dtau);
 	Real one_plus_hubble_dtau = 1. + hubble * dtau_mean;
 	Real one_minus_hubble_dtau = 1. - hubble * dtau_mean;
-	
-	gridk2 = (Real *) malloc(linesize * sizeof(Real));
-	kshift = (Cplx *) malloc(linesize * sizeof(Cplx));
-	
+
+	if (linesize <= STACK_ALLOCATION_LIMIT)
+	{
+		gridk2 = (Real *) alloca(linesize * sizeof(Real));
+		kshift = (Cplx *) alloca(linesize * sizeof(Cplx));
+	}
+	else
+	{
+		gridk2 = (Real *) malloc(linesize * sizeof(Real));
+		kshift = (Cplx *) malloc(linesize * sizeof(Cplx));
+	}
+
+#pragma omp parallel for
 	for (int i = 0; i < linesize; i++)
 	{
 		gridk2[i] = Real(2) * (Real) linesize * sin(M_PI * (Real) i / (Real) linesize);
 		kshift[i] = gridk2[i] * Cplx(cos(M_PI * (Real) i / (Real) linesize), -sin(M_PI * (Real) i / (Real) linesize));
 		gridk2[i] *= gridk2[i];
 	}
-	
-	k.first();
-	if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
+
+#pragma omp parallel for collapse(2) default(shared) firstprivate(k) private(k2, k4)
+	for (int i = 0; i < hijFT.lattice().sizeLocal(1); i++)
 	{
-		Cplx trS = SijFT(k, 0, 0) + SijFT(k, 1, 1) + SijFT(k, 2, 2);
-
-		SijFT(k, 0, 0) -= trS / Real(3);
-		SijFT(k, 1, 1) -= trS / Real(3);
-		SijFT(k, 2, 2) -= trS / Real(3);
-
-		for (int i = 0; i < hijprimeFT.components(); i++)
+		for (int j = 0; j < hijFT.lattice().sizeLocal(2); j++)
 		{
-			hijFT(k, i) += hijprimeFT(k, i) * dtau_old;
-			hijprimeFT(k, i) = (one_minus_hubble_dtau * hijprimeFT(k, i) + Real(2) * SijFT(k, i) * dtau_mean / linesize) / one_plus_hubble_dtau;
+			if (!k.setCoord(0, j + hijFT.lattice().coordSkip()[0], i + hijFT.lattice().coordSkip()[1]))
+			{
+				std::cerr << "proc#" << parallel.rank() << ": Error in evolveFTtensor! Could not set coordinates at k=(0, " << j + hijFT.lattice().coordSkip()[0] << ", " << i + hijFT.lattice().coordSkip()[1] << ")" << std::endl;
+				throw std::runtime_error("Error in evolveFTtensor: Could not set coordinates.");
+			}
+
+			for (int z = 0; z < hijFT.lattice().sizeLocal(0); z++)
+			{
+				k2 = gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)];
+				k4 = k2 * k2 * linesize;
+				
+				if (k2 * dtau_mean * dtau_mean < Real(1))
+				{
+					for (int c = 0; c < hijprimeFT.components(); c++)
+						hijFT(k, c) += hijprimeFT(k, c) * dtau_old;
+				
+					if (k2 > 0)
+					{
+						hijprimeFT(k, 0, 0) = (one_minus_hubble_dtau * hijprimeFT(k, 0, 0) + (((gridk2[k.coord(0)] - k2) * ((gridk2[k.coord(0)] - k2) * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(0)] * (kshift[k.coord(1)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 0, 2)))
+								+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SijFT(k, 1, 1)
+								+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SijFT(k, 2, 2)
+								+ Real(2) * (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2)) / k4 - k2 * hijFT(k, 0, 0)) * dtau_mean) / one_plus_hubble_dtau;
+				
+						hijprimeFT(k, 0, 1) = (one_minus_hubble_dtau * hijprimeFT(k, 0, 1) + ((Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(1)] - k2) * SijFT(k, 0, 1) + (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(1)].conj() * SijFT(k, 2, 2)
+								+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(0)].conj() * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(2)] * SijFT(k, 0, 2))
+								+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(1)].conj() * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(2)] * SijFT(k, 1, 2))) / k4 - k2 * hijFT(k, 0, 1)) * dtau_mean) / one_plus_hubble_dtau;
+				
+						hijprimeFT(k, 0, 2) = (one_minus_hubble_dtau * hijprimeFT(k, 0, 2) + ((Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(2)] - k2) * SijFT(k, 0, 2) + (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(2)].conj() * SijFT(k, 1, 1)
+								+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(0)].conj() * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(1)] * SijFT(k, 0, 1))
+								+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(2)].conj() * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(1)] * SijFT(k, 1, 2))) / k4 - k2 * hijFT(k, 0, 2)) * dtau_mean) / one_plus_hubble_dtau;
+				
+						hijprimeFT(k, 1, 1) = (one_minus_hubble_dtau * hijprimeFT(k, 1, 1) + (((gridk2[k.coord(1)] - k2) * ((gridk2[k.coord(1)] - k2) * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(1)] * (kshift[k.coord(0)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 1, 2)))
+								+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SijFT(k, 0, 0)
+								+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SijFT(k, 2, 2)
+								+ Real(2) * (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2)) / k4 - k2 * hijFT(k, 1, 1)) * dtau_mean) / one_plus_hubble_dtau;
+				
+						hijprimeFT(k, 1, 2) = (one_minus_hubble_dtau * hijprimeFT(k, 1, 2) + ((Real(2) * (gridk2[k.coord(1)] - k2) * (gridk2[k.coord(2)] - k2) * SijFT(k, 1, 2) + (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)].conj() * kshift[k.coord(2)].conj() * SijFT(k, 0, 0)
+								+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(1)].conj() * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(0)] * SijFT(k, 0, 1))
+								+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(2)].conj() * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(0)] * SijFT(k, 0, 2))) / k4 - k2 * hijFT(k, 1, 2)) * dtau_mean) / one_plus_hubble_dtau;
+				
+						hijprimeFT(k, 2, 2) = (one_minus_hubble_dtau * hijprimeFT(k, 2, 2) + (((gridk2[k.coord(2)] - k2) * ((gridk2[k.coord(2)] - k2) * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(2)] * (kshift[k.coord(0)] * SijFT(k, 0, 2) + kshift[k.coord(1)] * SijFT(k, 1, 2)))
+								+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SijFT(k, 0, 0)
+								+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SijFT(k, 1, 1)
+								+ Real(2) * (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)] * kshift[k.coord(1)] * SijFT(k, 0, 1)) / k4 - k2 * hijFT(k, 2, 2)) * dtau_mean) / one_plus_hubble_dtau;
+					}
+					else
+					{
+						Cplx trS = SijFT(k, 0, 0) + SijFT(k, 1, 1) + SijFT(k, 2, 2);
+
+						SijFT(k, 0, 0) -= trS / Real(3);
+						SijFT(k, 1, 1) -= trS / Real(3);
+						SijFT(k, 2, 2) -= trS / Real(3);
+
+						for (int c = 0; c < hijprimeFT.components(); c++)
+						{
+							hijprimeFT(k, c) = (one_minus_hubble_dtau * hijprimeFT(k, c) + Real(2) * SijFT(k, c) * dtau_mean / linesize) / one_plus_hubble_dtau;
+						}
+					}
+				}
+				else
+				{
+					for (int c = 0; c < hijprimeFT.components(); c++)
+						hijprimeFT(k, c) = Cplx(0.,0.);
+				
+					hijFT(k, 0, 0) = (((gridk2[k.coord(0)] - k2) * ((gridk2[k.coord(0)] - k2) * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(0)] * (kshift[k.coord(1)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 0, 2)))
+							+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SijFT(k, 1, 1)
+							+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SijFT(k, 2, 2)
+							+ Real(2) * (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2)) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 0, 0)) / (k2 * dtau_old + Real(2) * hubble);
+				
+					hijFT(k, 0, 1) = ((Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(1)] - k2) * SijFT(k, 0, 1) + (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(1)].conj() * SijFT(k, 2, 2)
+							+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(0)].conj() * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(2)] * SijFT(k, 0, 2))
+							+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(1)].conj() * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(2)] * SijFT(k, 1, 2))) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 0, 1)) / (k2 * dtau_old + Real(2) * hubble);
+				
+					hijFT(k, 0, 2) = ((Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(2)] - k2) * SijFT(k, 0, 2) + (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(2)].conj() * SijFT(k, 1, 1)
+							+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(0)].conj() * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(1)] * SijFT(k, 0, 1))
+							+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(2)].conj() * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(1)] * SijFT(k, 1, 2))) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 0, 2)) / (k2 * dtau_old + Real(2) * hubble);
+				
+					hijFT(k, 1, 1) = (((gridk2[k.coord(1)] - k2) * ((gridk2[k.coord(1)] - k2) * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(1)] * (kshift[k.coord(0)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 1, 2)))
+							+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SijFT(k, 0, 0)
+							+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SijFT(k, 2, 2)
+							+ Real(2) * (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2)) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 1, 1)) / (k2 * dtau_old + Real(2) * hubble);
+				
+					hijFT(k, 1, 2) = ((Real(2) * (gridk2[k.coord(1)] - k2) * (gridk2[k.coord(2)] - k2) * SijFT(k, 1, 2) + (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)].conj() * kshift[k.coord(2)].conj() * SijFT(k, 0, 0)
+							+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(1)].conj() * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(0)] * SijFT(k, 0, 1))
+							+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(2)].conj() * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(0)] * SijFT(k, 0, 2))) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 1, 2)) / (k2 * dtau_old + Real(2) * hubble);
+				
+					hijFT(k, 2, 2) = (((gridk2[k.coord(2)] - k2) * ((gridk2[k.coord(2)] - k2) * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(2)] * (kshift[k.coord(0)] * SijFT(k, 0, 2) + kshift[k.coord(1)] * SijFT(k, 1, 2)))
+							+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SijFT(k, 0, 0)
+							+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SijFT(k, 1, 1)
+							+ Real(2) * (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)] * kshift[k.coord(1)] * SijFT(k, 0, 1)) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 2, 2)) / (k2 * dtau_old + Real(2) * hubble);
+				}
+
+				k.next();
+			}
 		}
-			
-		k.next();
 	}
 	
-	for (; k.test(); k.next())
-	{		
-		k2 = gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)];
-		k4 = k2 * k2 * linesize;
-		
-		if (k2 * dtau_mean * dtau_mean < Real(1))
-		{
-			for (int i = 0; i < hijprimeFT.components(); i++)
-				hijFT(k, i) += hijprimeFT(k, i) * dtau_old;
-		
-			hijprimeFT(k, 0, 0) = (one_minus_hubble_dtau * hijprimeFT(k, 0, 0) + (((gridk2[k.coord(0)] - k2) * ((gridk2[k.coord(0)] - k2) * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(0)] * (kshift[k.coord(1)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 0, 2)))
-					+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SijFT(k, 1, 1)
-					+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SijFT(k, 2, 2)
-					+ Real(2) * (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2)) / k4 - k2 * hijFT(k, 0, 0)) * dtau_mean) / one_plus_hubble_dtau;
-		
-			hijprimeFT(k, 0, 1) = (one_minus_hubble_dtau * hijprimeFT(k, 0, 1) + ((Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(1)] - k2) * SijFT(k, 0, 1) + (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(1)].conj() * SijFT(k, 2, 2)
-					+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(0)].conj() * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(2)] * SijFT(k, 0, 2))
-					+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(1)].conj() * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(2)] * SijFT(k, 1, 2))) / k4 - k2 * hijFT(k, 0, 1)) * dtau_mean) / one_plus_hubble_dtau;
-		  
-			hijprimeFT(k, 0, 2) = (one_minus_hubble_dtau * hijprimeFT(k, 0, 2) + ((Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(2)] - k2) * SijFT(k, 0, 2) + (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(2)].conj() * SijFT(k, 1, 1)
-					+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(0)].conj() * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(1)] * SijFT(k, 0, 1))
-					+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(2)].conj() * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(1)] * SijFT(k, 1, 2))) / k4 - k2 * hijFT(k, 0, 2)) * dtau_mean) / one_plus_hubble_dtau;
-		
-			hijprimeFT(k, 1, 1) = (one_minus_hubble_dtau * hijprimeFT(k, 1, 1) + (((gridk2[k.coord(1)] - k2) * ((gridk2[k.coord(1)] - k2) * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(1)] * (kshift[k.coord(0)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 1, 2)))
-					+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SijFT(k, 0, 0)
-					+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SijFT(k, 2, 2)
-					+ Real(2) * (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2)) / k4 - k2 * hijFT(k, 1, 1)) * dtau_mean) / one_plus_hubble_dtau;
-		
-			hijprimeFT(k, 1, 2) = (one_minus_hubble_dtau * hijprimeFT(k, 1, 2) + ((Real(2) * (gridk2[k.coord(1)] - k2) * (gridk2[k.coord(2)] - k2) * SijFT(k, 1, 2) + (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)].conj() * kshift[k.coord(2)].conj() * SijFT(k, 0, 0)
-					+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(1)].conj() * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(0)] * SijFT(k, 0, 1))
-					+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(2)].conj() * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(0)] * SijFT(k, 0, 2))) / k4 - k2 * hijFT(k, 1, 2)) * dtau_mean) / one_plus_hubble_dtau;
-		
-			hijprimeFT(k, 2, 2) = (one_minus_hubble_dtau * hijprimeFT(k, 2, 2) + (((gridk2[k.coord(2)] - k2) * ((gridk2[k.coord(2)] - k2) * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(2)] * (kshift[k.coord(0)] * SijFT(k, 0, 2) + kshift[k.coord(1)] * SijFT(k, 1, 2)))
-					+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SijFT(k, 0, 0)
-					+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SijFT(k, 1, 1)
-					+ Real(2) * (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)] * kshift[k.coord(1)] * SijFT(k, 0, 1)) / k4 - k2 * hijFT(k, 2, 2)) * dtau_mean) / one_plus_hubble_dtau;
-		}
-		else
-		{
-			for (int i = 0; i < hijprimeFT.components(); i++)
-				hijprimeFT(k, i) = Cplx(0.,0.);
-		
-			hijFT(k, 0, 0) = (((gridk2[k.coord(0)] - k2) * ((gridk2[k.coord(0)] - k2) * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(0)] * (kshift[k.coord(1)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 0, 2)))
-					+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SijFT(k, 1, 1)
-					+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SijFT(k, 2, 2)
-					+ Real(2) * (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2)) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 0, 0)) / (k2 * dtau_old + Real(2) * hubble);
-		
-			hijFT(k, 0, 1) = ((Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(1)] - k2) * SijFT(k, 0, 1) + (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(1)].conj() * SijFT(k, 2, 2)
-					+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(0)].conj() * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(2)] * SijFT(k, 0, 2))
-					+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(1)].conj() * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(2)] * SijFT(k, 1, 2))) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 0, 1)) / (k2 * dtau_old + Real(2) * hubble);
-		  
-			hijFT(k, 0, 2) = ((Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(2)] - k2) * SijFT(k, 0, 2) + (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(2)].conj() * SijFT(k, 1, 1)
-					+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(0)].conj() * SijFT(k, 0, 0) + Real(2) * kshift[k.coord(1)] * SijFT(k, 0, 1))
-					+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(2)].conj() * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(1)] * SijFT(k, 1, 2))) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 0, 2)) / (k2 * dtau_old + Real(2) * hubble);
-		
-			hijFT(k, 1, 1) = (((gridk2[k.coord(1)] - k2) * ((gridk2[k.coord(1)] - k2) * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(1)] * (kshift[k.coord(0)] * SijFT(k, 0, 1) + kshift[k.coord(2)] * SijFT(k, 1, 2)))
-					+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SijFT(k, 0, 0)
-					+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SijFT(k, 2, 2)
-					+ Real(2) * (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2)) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 1, 1)) / (k2 * dtau_old + Real(2) * hubble);
-		
-			hijFT(k, 1, 2) = ((Real(2) * (gridk2[k.coord(1)] - k2) * (gridk2[k.coord(2)] - k2) * SijFT(k, 1, 2) + (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)].conj() * kshift[k.coord(2)].conj() * SijFT(k, 0, 0)
-					+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(1)].conj() * SijFT(k, 1, 1) + Real(2) * kshift[k.coord(0)] * SijFT(k, 0, 1))
-					+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(2)].conj() * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(0)] * SijFT(k, 0, 2))) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 1, 2)) / (k2 * dtau_old + Real(2) * hubble);
-		
-			hijFT(k, 2, 2) = (((gridk2[k.coord(2)] - k2) * ((gridk2[k.coord(2)] - k2) * SijFT(k, 2, 2) + Real(2) * kshift[k.coord(2)] * (kshift[k.coord(0)] * SijFT(k, 0, 2) + kshift[k.coord(1)] * SijFT(k, 1, 2)))
-					+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SijFT(k, 0, 0)
-					+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SijFT(k, 1, 1)
-					+ Real(2) * (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)] * kshift[k.coord(1)] * SijFT(k, 0, 1)) * dtau_old / k4 + Real(2) * hubble * hijFT(k, 2, 2)) / (k2 * dtau_old + Real(2) * hubble);
-		}
+	if (linesize > STACK_ALLOCATION_LIMIT)
+	{
+		free(gridk2);
+		free(kshift);
 	}
-	
-	free(gridk2);
-	free(kshift);
 }
 
 
@@ -714,17 +801,87 @@ void projectFTtensor(Field<Cplx> & SijFT, Field<Cplx> & hijFT)
 	Cplx SxxFT, SxyFT, SxzFT, SyyFT, SyzFT, SzzFT;
 	Real k2, k6;
 	
-	gridk2 = (Real *) malloc(linesize * sizeof(Real));
-	kshift = (Cplx *) malloc(linesize * sizeof(Cplx));
-	
+	if (linesize <= STACK_ALLOCATION_LIMIT)
+	{
+		gridk2 = (Real *) alloca(linesize * sizeof(Real));
+		kshift = (Cplx *) alloca(linesize * sizeof(Cplx));
+	}
+	else
+	{
+		gridk2 = (Real *) malloc(linesize * sizeof(Real));
+		kshift = (Cplx *) malloc(linesize * sizeof(Cplx));
+	}
+
+#pragma omp parallel for
 	for (int i = 0; i < linesize; i++)
 	{
 		gridk2[i] = Real(2) * (Real) linesize * sin(M_PI * (Real) i / (Real) linesize);
 		kshift[i] = gridk2[i] * Cplx(cos(M_PI * (Real) i / (Real) linesize), -sin(M_PI * (Real) i / (Real) linesize));
 		gridk2[i] *= gridk2[i];
 	}
+
+#pragma omp parallel for collapse(2) default(shared) firstprivate(k) private(SxxFT, SxyFT, SxzFT, SyyFT, SyzFT, SzzFT, k2, k6)
+	for (int i = 0; i < hijFT.lattice().sizeLocal(1); i++)
+	{
+		for (int j = 0; j < hijFT.lattice().sizeLocal(2); j++)
+		{
+			if (!k.setCoord(0, j + hijFT.lattice().coordSkip()[0], i + hijFT.lattice().coordSkip()[1]))
+			{
+				std::cerr << "proc#" << parallel.rank() << ": Error in projectFTtensor! Could not set coordinates at k=(0, " << j + hijFT.lattice().coordSkip()[0] << ", " << i + hijFT.lattice().coordSkip()[1] << ")" << std::endl;
+				throw std::runtime_error("Error in projectFTtensor: Could not set coordinates.");
+			}
+
+			for (int z = 0; z < hijFT.lattice().sizeLocal(0); z++)
+			{
+				SxxFT = SijFT(k, 0, 0);
+				SxyFT = SijFT(k, 0, 1);
+				SxzFT = SijFT(k, 0, 2);
+				SyyFT = SijFT(k, 1, 1);
+				SyzFT = SijFT(k, 1, 2);
+				SzzFT = SijFT(k, 2, 2);
+				
+				k2 = gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)];
+				k6 = k2 * k2 * k2 * linesize;
+				
+				hijFT(k, 0, 0) = ((gridk2[k.coord(0)] - k2) * ((gridk2[k.coord(0)] - k2) * SxxFT + Real(2) * kshift[k.coord(0)] * (kshift[k.coord(1)] * SxyFT + kshift[k.coord(2)] * SxzFT))
+						+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SyyFT
+						+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SzzFT
+						+ Real(2) * (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)] * kshift[k.coord(2)] * SyzFT) / k6;
+				
+				hijFT(k, 0, 1) = (Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(1)] - k2) * SxyFT + (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(1)].conj() * SzzFT
+						+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(0)].conj() * SxxFT + Real(2) * kshift[k.coord(2)] * SxzFT)
+						+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(1)].conj() * SyyFT + Real(2) * kshift[k.coord(2)] * SyzFT)) / k6;
+				
+				hijFT(k, 0, 2) = (Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(2)] - k2) * SxzFT + (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(2)].conj() * SyyFT
+						+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(0)].conj() * SxxFT + Real(2) * kshift[k.coord(1)] * SxyFT)
+						+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(2)].conj() * SzzFT + Real(2) * kshift[k.coord(1)] * SyzFT)) / k6;
+				
+				hijFT(k, 1, 1) = ((gridk2[k.coord(1)] - k2) * ((gridk2[k.coord(1)] - k2) * SyyFT + Real(2) * kshift[k.coord(1)] * (kshift[k.coord(0)] * SxyFT + kshift[k.coord(2)] * SyzFT))
+						+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SxxFT
+						+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SzzFT
+						+ Real(2) * (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)] * kshift[k.coord(2)] * SxzFT) / k6;
+				
+				hijFT(k, 1, 2) = (Real(2) * (gridk2[k.coord(1)] - k2) * (gridk2[k.coord(2)] - k2) * SyzFT + (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)].conj() * kshift[k.coord(2)].conj() * SxxFT
+						+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(1)].conj() * SyyFT + Real(2) * kshift[k.coord(0)] * SxyFT)
+						+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(2)].conj() * SzzFT + Real(2) * kshift[k.coord(0)] * SxzFT)) / k6;
+				
+				hijFT(k, 2, 2) = ((gridk2[k.coord(2)] - k2) * ((gridk2[k.coord(2)] - k2) * SzzFT + Real(2) * kshift[k.coord(2)] * (kshift[k.coord(0)] * SxzFT + kshift[k.coord(1)] * SyzFT))
+						+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SxxFT
+						+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SyyFT
+						+ Real(2) * (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)] * kshift[k.coord(1)] * SxyFT) / k6;
+
+				k.next();
+			}
+		}
+	}
+
+	if (k.setCoord(0, 0, 0))
+	{
+		for (int i = 0; i < hijFT.components(); i++)
+			hijFT(k, i) = Cplx(0,0);
+	}
 	
-	k.first();
+	/*k.first();
 	if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
 	{
 		for (int i = 0; i < hijFT.components(); i++)
@@ -735,46 +892,14 @@ void projectFTtensor(Field<Cplx> & SijFT, Field<Cplx> & hijFT)
 	
 	for (; k.test(); k.next())
 	{
-		SxxFT = SijFT(k, 0, 0);
-		SxyFT = SijFT(k, 0, 1);
-		SxzFT = SijFT(k, 0, 2);
-		SyyFT = SijFT(k, 1, 1);
-		SyzFT = SijFT(k, 1, 2);
-		SzzFT = SijFT(k, 2, 2);
 		
-		k2 = gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)];
-		k6 = k2 * k2 * k2 * linesize;
-		
-		hijFT(k, 0, 0) = ((gridk2[k.coord(0)] - k2) * ((gridk2[k.coord(0)] - k2) * SxxFT + Real(2) * kshift[k.coord(0)] * (kshift[k.coord(1)] * SxyFT + kshift[k.coord(2)] * SxzFT))
-				+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SyyFT
-				+ ((gridk2[k.coord(0)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SzzFT
-				+ Real(2) * (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)] * kshift[k.coord(2)] * SyzFT) / k6;
-		
-		hijFT(k, 0, 1) = (Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(1)] - k2) * SxyFT + (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(1)].conj() * SzzFT
-				+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(0)].conj() * SxxFT + Real(2) * kshift[k.coord(2)] * SxzFT)
-				+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(1)].conj() * SyyFT + Real(2) * kshift[k.coord(2)] * SyzFT)) / k6;
-		  
-		hijFT(k, 0, 2) = (Real(2) * (gridk2[k.coord(0)] - k2) * (gridk2[k.coord(2)] - k2) * SxzFT + (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)].conj() * kshift[k.coord(2)].conj() * SyyFT
-				+ (gridk2[k.coord(0)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(0)].conj() * SxxFT + Real(2) * kshift[k.coord(1)] * SxyFT)
-				+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(0)].conj() * (kshift[k.coord(2)].conj() * SzzFT + Real(2) * kshift[k.coord(1)] * SyzFT)) / k6;
-		
-		hijFT(k, 1, 1) = ((gridk2[k.coord(1)] - k2) * ((gridk2[k.coord(1)] - k2) * SyyFT + Real(2) * kshift[k.coord(1)] * (kshift[k.coord(0)] * SxyFT + kshift[k.coord(2)] * SyzFT))
-				+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SxxFT
-				+ ((gridk2[k.coord(1)] + k2) * (gridk2[k.coord(2)] + k2) - Real(2) * k2 * k2) * SzzFT
-				+ Real(2) * (gridk2[k.coord(1)] + k2) * kshift[k.coord(0)] * kshift[k.coord(2)] * SxzFT) / k6;
-		
-		hijFT(k, 1, 2) = (Real(2) * (gridk2[k.coord(1)] - k2) * (gridk2[k.coord(2)] - k2) * SyzFT + (gridk2[k.coord(0)] + k2) * kshift[k.coord(1)].conj() * kshift[k.coord(2)].conj() * SxxFT
-				+ (gridk2[k.coord(1)] - k2) * kshift[k.coord(2)].conj() * (kshift[k.coord(1)].conj() * SyyFT + Real(2) * kshift[k.coord(0)] * SxyFT)
-				+ (gridk2[k.coord(2)] - k2) * kshift[k.coord(1)].conj() * (kshift[k.coord(2)].conj() * SzzFT + Real(2) * kshift[k.coord(0)] * SxzFT)) / k6;
-		
-		hijFT(k, 2, 2) = ((gridk2[k.coord(2)] - k2) * ((gridk2[k.coord(2)] - k2) * SzzFT + Real(2) * kshift[k.coord(2)] * (kshift[k.coord(0)] * SxzFT + kshift[k.coord(1)] * SyzFT))
-				+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(0)] + k2) - Real(2) * k2 * k2) * SxxFT
-				+ ((gridk2[k.coord(2)] + k2) * (gridk2[k.coord(1)] + k2) - Real(2) * k2 * k2) * SyyFT
-				+ Real(2) * (gridk2[k.coord(2)] + k2) * kshift[k.coord(0)] * kshift[k.coord(1)] * SxyFT) / k6;
-	}
+	}*/
 	
-	free(gridk2);
-	free(kshift);
+	if (linesize > STACK_ALLOCATION_LIMIT)
+	{
+		free(gridk2);
+		free(kshift);
+	}
 }
 
 
@@ -800,10 +925,14 @@ void solveModifiedPoissonFT(Field<Cplx> & sourceFT, Field<Cplx> & potFT, Real co
 	Real * gridk2;
 	rKSite k(potFT.lattice());
 	
-	gridk2 = (Real *) malloc(linesize * sizeof(Real));
+	if (linesize <= STACK_ALLOCATION_LIMIT)
+		gridk2 = (Real *) alloca(linesize * sizeof(Real));
+	else
+		gridk2 = (Real *) malloc(linesize * sizeof(Real));
 	
 	coeff /= -((long) linesize * (long) linesize * (long) linesize);
-	
+
+#pragma omp parallel for
 	for (int i = 0; i < linesize; i++)
 	{
 		gridk2[i] = Real(2) * (Real) linesize * sin(M_PI * (Real) i / (Real) linesize);
@@ -849,7 +978,8 @@ void solveModifiedPoissonFT(Field<Cplx> & sourceFT, Field<Cplx> & potFT, Real co
 		potFT(k) = sourceFT(k) * coeff / (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)] + modif);
 	}*/
 	
-	free(gridk2);
+	if (linesize > STACK_ALLOCATION_LIMIT)
+		free(gridk2);
 }
 #endif
 

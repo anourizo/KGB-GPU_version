@@ -6,7 +6,7 @@
 //
 // Author: Julian Adamek (Université de Genève & Observatoire de Paris & Queen Mary University of London & Universität Zürich)
 //
-// Last modified: January 2025
+// Last modified: February 2025
 //
 //////////////////////////
 
@@ -129,6 +129,10 @@
 
 #ifndef PCL_EXTRA_CAPACITY
 #define PCL_EXTRA_CAPACITY 65536        // extra capacity for particle handler
+#endif
+
+#ifndef STACK_ALLOCATION_LIMIT
+#define STACK_ALLOCATION_LIMIT 9216    // stack allocation limit for fast arrays
 #endif
 
 #ifdef EXTERNAL_IO

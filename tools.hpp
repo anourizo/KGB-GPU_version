@@ -4,9 +4,9 @@
 // 
 // Collection of analysis tools for gevolution
 //
-// Author: Julian Adamek (Université de Genève & Observatoire de Paris & Queen Mary University of London)
+// Author: Julian Adamek (Université de Genève & Observatoire de Paris & Queen Mary University of London & Universität Zürich)
 //
-// Last modified: April 2019
+// Last modified: February 2025
 //
 //////////////////////////
 
@@ -683,5 +683,104 @@ string hourMinSec(double seconds)
 
 	return output;
 }
+
+#ifdef HAVE_HEALPIX
+
+__device__ int64_t compress_bits64_helper (int64_t v)
+{
+	const short ctab[]={
+		#define Z(a) a,a+1,a+256,a+257
+		#define Y(a) Z(a),Z(a+2),Z(a+512),Z(a+514)
+		#define X(a) Y(a),Y(a+4),Y(a+1024),Y(a+1028)
+		X(0),X(8),X(2048),X(2056)
+		#undef X
+		#undef Y
+		#undef Z
+	};
+	int64_t raw = v&0x5555555555555555ull;
+	raw|=raw>>15;
+	return ctab[ raw     &0xff]      | (ctab[(raw>> 8)&0xff]<< 4)
+		| (ctab[(raw>>32)&0xff]<<16) | (ctab[(raw>>40)&0xff]<<20);
+}
+
+__device__ void nest2xyf64_helper (int64_t nside, int64_t pix, int *ix, int *iy, int *face_num)
+{
+	int64_t npface_=nside*nside;
+	*face_num = pix/npface_;
+	pix &= (npface_-1);
+	*ix = compress_bits64_helper(pix);
+	*iy = compress_bits64_helper(pix>>1);
+}
+
+
+//////////////////////////
+// pix2vec_nest64_gpu
+//////////////////////////
+// Description:
+//   converts pixel index to vector on unit sphere (device code)
+//
+// Arguments:
+//   nside      HEALPix resolution parameter
+//   ipix       pixel index
+//   vec        will contain the vector
+//
+// Returns:
+//
+//////////////////////////
+
+__device__ void pix2vec_nest64_gpu(int64_t nside, int64_t pix, double *vec)
+{
+	double z, phi, s = -5;
+	int64_t nl4 = nside*4;
+	int64_t npix_=12*nside*nside;
+	double fact2_ = 4./npix_;
+	int face_num, ix, iy;
+	int64_t jr, nr, kshift, jp;
+	const int jrll_[] = { 2,2,2,2,3,3,3,3,4,4,4,4 };
+	const int jpll_[] = { 1,3,5,7,0,2,4,6,1,3,5,7 };
+
+	nest2xyf64_helper(nside,pix,&ix,&iy,&face_num);
+	jr = (jrll_[face_num]*nside) - ix - iy - 1;
+
+	if (jr<nside)
+	{
+		double tmp;
+		nr = jr;
+		tmp=(nr*nr)*fact2_;
+		z = 1 - tmp;
+		if (z>0.99) s=sqrt(tmp*(2.-tmp));
+		kshift = 0;
+	}
+	else if (jr > 3*nside)
+	{
+		double tmp;
+		nr = nl4-jr;
+		tmp=(nr*nr)*fact2_;
+		z = tmp - 1;
+		if (z<-0.99) s=sqrt(tmp*(2.-tmp));
+		kshift = 0;
+	}
+	else
+	{
+		double fact1_ = (nside<<1)*fact2_;
+		nr = nside;
+		z = (2*nside-jr)*fact1_;
+		kshift = (jr-nside)&1;
+	}
+
+	jp = (jpll_[face_num]*nr + ix -iy + 1 + kshift) / 2;
+	if (jp>nl4) jp-=nl4;
+	if (jp<1) jp+=nl4;
+
+	phi = (jp-(kshift+1)*0.5)*(1.570796326794896619231321691639751442099/nr);
+
+	if (s<-2) s=sqrt((1.-z)*(1.+z));
+
+	vec[0]=s*cos(phi);
+	vec[1]=s*sin(phi);
+	vec[2]=z;
+}
+
+#endif
 
 #endif

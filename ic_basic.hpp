@@ -1158,27 +1158,40 @@ void generateDisplacementField(Field<Cplx> & potFT, const Real coeff, const gsl_
 {
 	const int linesize = potFT.lattice().size(1);
 	const int kmax = (linesize / 2) - 1;
+	const int kmax2 = kmax * kmax;
 	rKSite k(potFT.lattice());
-	int kx, ky, kz, i, j;
-	int kymin, kymax, kzmin, kzmax;
+	int kx;
+	int kymin, kymax, kzmin, kzmax, kyend, kzend;
 	float r1, r2, k2, s;
 	float * sinc;
 	sitmo::prng_engine prng;
 	uint64_t huge_skip = HUGE_SKIP;
-	gsl_interp_accel * acc = gsl_interp_accel_alloc();
+	gsl_interp_accel * acc;
+
+	if (ignorekernel == 0)
+	{
+		nvtxRangePushA("generateDisplacementField");
+	}
+	else
+	{
+		nvtxRangePushA("generateRealization");
+	}
 	
-	sinc = (float *) malloc(linesize * sizeof(float));
+	if (linesize <= STACK_ALLOCATION_LIMIT)
+		sinc = (float *) alloca(linesize * sizeof(float));
+	else
+		sinc = (float *) malloc(linesize * sizeof(float));
 	
 	sinc[0] = 1.;
 	if (deconvolve_f == 1)
 	{
-		for (i = 1; i < linesize; i++)
+		for (int i = 1; i < linesize; i++)
 			sinc[i] = sin(M_PI * (float) i / (float) linesize) * (float) linesize / (M_PI * (float) i);
 	}
 	else
 	{
-		for (i = 1; i < linesize; i++)
-			sinc[i] = 1.;
+		for (int i = 1; i < linesize; i++)
+			sinc[i] = 1.0f;
 	}
 	
 	k.initialize(potFT.lattice(), potFT.lattice().siteLast());
@@ -1187,261 +1200,320 @@ void generateDisplacementField(Field<Cplx> & potFT, const Real coeff, const gsl_
 	k.initialize(potFT.lattice(), potFT.lattice().siteFirst());
 	kymin = k.coord(1);
 	kzmin = k.coord(2);
+
+	kzend = (linesize / 2 < kzmax) ? linesize / 2 : kzmax;
 		
 	if (kymin < (linesize / 2) + 1 && kzmin < (linesize / 2) + 1)
 	{
-		prng.seed(seed);
-		   
-		if (kymin == 0 && kzmin == 0)
+		kyend = (linesize / 2 < kymax) ? linesize / 2 : kymax;
+
+		#pragma omp parallel default(shared) private(acc, kx, k2, r1, r2, s) firstprivate(prng, k)
 		{
-			k.setCoord(0, 0, 0);
-			potFT(k) = Cplx(0.,0.);
-			kx = 1;
-		}
-		else
-		{
-			kx = 0;
-			prng.discard(((uint64_t) kzmin * huge_skip + (uint64_t) kymin) * huge_skip); 
-		}
+		acc = gsl_interp_accel_alloc();
 		
-		for (kz = kzmin; kz < (linesize / 2) + 1 && kz <= kzmax; kz++)
+		#pragma omp for collapse(2)
+		for (int kz = kzmin; kz <= kzend; kz++)
 		{
-			for (ky = kymin, j = 0; ky < (linesize / 2) + 1 && ky <= kymax; ky++, j++)
+			for (int ky = kymin; ky <= kyend; ky++)
 			{
-				for (i = 0; kx < (linesize / 2) + 1; kx++)
+				prng.seed(seed);
+		   
+				if (ky > 0 || kz > 0)
+				{
+					prng.discard(((uint64_t) kz * huge_skip + (uint64_t) ky) * huge_skip);
+				}
+				//i = 0;
+				for (kx = 0; kx < (linesize / 2) + 1; kx++)
 				{
 					k.setCoord(kx, ky, kz);
 					
 					k2 = (float) (kx * kx) + (float) (ky * ky) + (float) (kz * kz);
 					
-					if (kx >= kmax || ky >= kmax || kz >= kmax || (k2 >= kmax * kmax && ksphere > 0))
+					if (k2 == 0 || kx >= kmax || ky >= kmax || kz >= kmax || (k2 >= kmax2 && ksphere > 0))
 					{
-						potFT(k) = Cplx(0., 0.);
+						potFT(k) = Cplx(0, 0);
 					}
 					else
 					{
 						s = sinc[kx] * sinc[ky] * sinc[kz];
-						k2 *= 4. * M_PI * M_PI;
+						k2 *= 4.0f * M_PI * M_PI;
 						do
 						{
 							r1 = (float) prng() / (float) sitmo::prng_engine::max();
-							i++;
+							//i++;
 						}
-						while (r1 == 0.);
+						while (r1 == 0);
+
 						r2 = (float) prng() / (float) sitmo::prng_engine::max();
-						i++;
+						//i++;
 					
-						potFT(k) = (ignorekernel ? Cplx(cos(2. * M_PI * r2), sin(2. * M_PI * r2)) : Cplx(cos(2. * M_PI * r2), sin(2. * M_PI * r2)) * (1. + 7.5 * coeff / k2) / potFT(k)) * sqrt(-2. * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
+						potFT(k) = (ignorekernel ? Cplx(cos(2.0f * M_PI * r2), sin(2.0f * M_PI * r2)) : Cplx(cos(2.0f * M_PI * r2), sin(2.0f * M_PI * r2)) * (1.0f + 7.5f * static_cast<float>(coeff) / k2) / potFT(k)) * sqrt(-2.0f * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
 					}
 				}
-				prng.discard(huge_skip - (uint64_t) i);
-				kx = 0;
+				//prng.discard(huge_skip - (uint64_t) i);
 			}
-			prng.discard(huge_skip * (huge_skip - (uint64_t) j));
+			//prng.discard(huge_skip * (huge_skip - (uint64_t) (kyend - kymin + 1)));
+		}
+
+		gsl_interp_accel_free(acc);
 		}
 	}
 	
 	if (kymax >= (linesize / 2) + 1 && kzmin < (linesize / 2) + 1)
 	{
-		prng.seed(seed);
-		prng.discard(((huge_skip + (uint64_t) kzmin) * huge_skip + (uint64_t) (linesize - kymax)) * huge_skip);
-		
-		for (kz = kzmin; kz < (linesize / 2) + 1 && kz <= kzmax; kz++)
+		//prng.seed(seed);
+		//prng.discard(((huge_skip + (uint64_t) kzmin) * huge_skip + (uint64_t) (linesize - kymax)) * huge_skip);
+
+		kyend = (linesize / 2 >= kymin) ? (linesize / 2) + 1 : kymin;
+
+		#pragma omp parallel default(shared) private(acc, kx, k2, r1, r2, s) firstprivate(prng, k)
 		{
-			for (ky = kymax, j = 0; ky >= (linesize / 2) + 1 && ky >= kymin; ky--, j++)
+		acc = gsl_interp_accel_alloc();
+		
+		#pragma omp for collapse(2)
+		for (int kz = kzmin; kz <= kzend; kz++)
+		{
+			for (int ky = kymax; ky >= kyend; ky--)
 			{
-				for (kx = 0, i = 0; kx < (linesize / 2) + 1; kx++)
+				prng.seed(seed);
+				prng.discard(((huge_skip + (uint64_t) kz) * huge_skip + (uint64_t) (linesize - ky)) * huge_skip);
+
+				//i = 0;
+				for (kx = 0; kx < (linesize / 2) + 1; kx++)
 				{
 					k.setCoord(kx, ky, kz);
 										
 					k2 = (float) (kx * kx) + (float) ((linesize-ky) * (linesize-ky)) + (float) (kz * kz);
 					
-					if (kx >= kmax || (linesize-ky) >= kmax || kz >= kmax || (k2 >= kmax * kmax && ksphere > 0))
+					if (kx >= kmax || (linesize-ky) >= kmax || kz >= kmax || (k2 >= kmax2 && ksphere > 0))
 					{
-						potFT(k) = Cplx(0., 0.);
+						potFT(k) = Cplx(0, 0);
 					}
 					else
 					{
 						s = sinc[kx] * sinc[linesize-ky] * sinc[kz];
-						k2 *= 4. * M_PI * M_PI;
+						k2 *= 4.0f * M_PI * M_PI;
 						do
 						{
 							r1 = (float) prng() / (float) sitmo::prng_engine::max();
-							i++;
+							//i++;
 						}
-						while (r1 == 0.);
+						while (r1 == 0);
 						r2 = (float) prng() / (float) sitmo::prng_engine::max();
-						i++;
+						//i++;
 						
-						potFT(k) = (ignorekernel ? Cplx(cos(2. * M_PI * r2), sin(2. * M_PI * r2)) : Cplx(cos(2. * M_PI * r2), sin(2. * M_PI * r2)) * (1. + 7.5 * coeff / k2) / potFT(k)) * sqrt(-2. * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
+						potFT(k) = (ignorekernel ? Cplx(cos(2.0f * M_PI * r2), sin(2.0f * M_PI * r2)) : Cplx(cos(2.0f * M_PI * r2), sin(2.0f * M_PI * r2)) * (1.0f + 7.5f * static_cast<float>(coeff) / k2) / potFT(k)) * sqrt(-2.0f * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
 					}
 				}
-				prng.discard(huge_skip - (uint64_t) i);
+				//prng.discard(huge_skip - (uint64_t) i);
 			}
-			prng.discard(huge_skip * (huge_skip - (uint64_t) j));
+			//prng.discard(huge_skip * (huge_skip - (uint64_t) (kymax - kyend + 1)));
+		}
+
+		gsl_interp_accel_free(acc);
 		}
 	}
+
+	kzend = (linesize / 2 >= kzmin) ? (linesize / 2) + 1 : kzmin;
 	
 	if (kymin < (linesize / 2) + 1 && kzmax >= (linesize / 2) + 1)
 	{
-		prng.seed(seed);
-		prng.discard(((huge_skip + huge_skip + (uint64_t) (linesize - kzmax)) * huge_skip + (uint64_t) kymin) * huge_skip);
-		
-		for (kz = kzmax; kz >= (linesize / 2) + 1 && kz >= kzmin; kz--)
+		//prng.seed(seed);
+		//prng.discard(((huge_skip + huge_skip + (uint64_t) (linesize - kzmax)) * huge_skip + (uint64_t) kymin) * huge_skip);
+
+		kyend = (linesize / 2 < kymax) ? linesize / 2 : kymax;
+
+		#pragma omp parallel default(shared) private(acc, kx, k2, r1, r2, s) firstprivate(prng, k)
 		{
-			for (ky = kymin, j = 0; ky < (linesize / 2) + 1 && ky <= kymax; ky++, j++)
+		acc = gsl_interp_accel_alloc();
+
+		#pragma omp for collapse(2)
+		for (int kz = kzmax; kz >= kzend; kz--)
+		{
+			for (int ky = kymin; ky <= kyend; ky++)
 			{
-				for (kx = 1, i = 0; kx < (linesize / 2) + 1; kx++)
+				prng.seed(seed);
+				prng.discard(((huge_skip + huge_skip + (uint64_t) (linesize - kz)) * huge_skip + (uint64_t) ky) * huge_skip);
+
+				//i = 0;
+				for (kx = 1; kx < (linesize / 2) + 1; kx++)
 				{
 					k.setCoord(kx, ky, kz);
 					
 					k2 = (float) (kx * kx) + (float) (ky * ky) + (float) ((linesize-kz) * (linesize-kz));
 					
-					if (kx >= kmax || ky >= kmax || (linesize-kz) >= kmax || (k2 >= kmax * kmax && ksphere > 0))
+					if (kx >= kmax || ky >= kmax || (linesize-kz) >= kmax || (k2 >= kmax2 && ksphere > 0))
 					{
-						potFT(k) = Cplx(0., 0.);
+						potFT(k) = Cplx(0, 0);
 					}
 					else
 					{
 						s = sinc[kx] * sinc[ky] * sinc[linesize-kz];
-						k2 *= 4. * M_PI * M_PI;
+						k2 *= 4.0f * M_PI * M_PI;
 						do
 						{
 							r1 = (float) prng() / (float) sitmo::prng_engine::max();
-							i++;
+							//i++;
 						}
-						while (r1 == 0.);
+						while (r1 == 0);
 						r2 = (float) prng() / (float) sitmo::prng_engine::max();
-						i++;
+						//i++;
 					
-						potFT(k) = (ignorekernel ? Cplx(cos(2. * M_PI * r2), sin(2. * M_PI * r2)) : Cplx(cos(2. * M_PI * r2), sin(2. * M_PI * r2)) * (1. + 7.5 * coeff / k2) / potFT(k)) * sqrt(-2. * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
+						potFT(k) = (ignorekernel ? Cplx(cos(2.0f * M_PI * r2), sin(2.0f * M_PI * r2)) : Cplx(cos(2.0f * M_PI * r2), sin(2.0f * M_PI * r2)) * (1.0f + 7.5f * static_cast<float>(coeff) / k2) / potFT(k)) * sqrt(-2.0f * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
 					}
 				}
-				prng.discard(huge_skip - (uint64_t) i);
+				//prng.discard(huge_skip - (uint64_t) i);
 			}
-			prng.discard(huge_skip * (huge_skip - (uint64_t) j));
+			//prng.discard(huge_skip * (huge_skip - (uint64_t) (kyend - kymin + 1)));
 		}
 		
-		prng.seed(seed);
-		prng.discard(((uint64_t) (linesize - kzmax) * huge_skip + (uint64_t) kymin) * huge_skip);
+		//prng.seed(seed);
+		//prng.discard(((uint64_t) (linesize - kzmax) * huge_skip + (uint64_t) kymin) * huge_skip);
 		kx = 0;
 		
-		for (kz = kzmax; kz >= (linesize / 2) + 1 && kz >= kzmin; kz--)
+		#pragma omp for
+		for (int kz = kzmax; kz >= kzend; kz--)
 		{
-			for (ky = kymin, j = 0; ky < (linesize / 2) + 1 && ky <= kymax; ky++, j++)
+			for (int ky = kymin; ky <= kyend; ky++)
 			{
+				prng.seed(seed);
+				prng.discard((((uint64_t) (linesize - kz)) * huge_skip + (uint64_t) ky) * huge_skip);
+
 				k.setCoord(kx, ky, kz);
 					
 				k2 = (float) (ky * ky) + (float) ((linesize-kz) * (linesize-kz));
-				i = 0;
+				//i = 0;
 				
-				if (ky >= kmax || (linesize-kz) >= kmax || (k2 >= kmax * kmax && ksphere > 0))
+				if (ky >= kmax || (linesize-kz) >= kmax || (k2 >= kmax2 && ksphere > 0))
 				{
-					potFT(k) = Cplx(0., 0.);
+					potFT(k) = Cplx(0, 0);
 				}
 				else
 				{
 					s = sinc[ky] * sinc[linesize-kz];
-					k2 *= 4. * M_PI * M_PI;
+					k2 *= 4.0f * M_PI * M_PI;
 					do
 					{
 						r1 = (float) prng() / (float) sitmo::prng_engine::max();
-						i++;
+						//i++;
 					}
-					while (r1 == 0.);
+					while (r1 == 0);
 					r2 = (float) prng() / (float) sitmo::prng_engine::max();
-					i++;
+					//i++;
 				
-					potFT(k) = (ignorekernel? Cplx(cos(2. * M_PI * r2), -sin(2. * M_PI * r2)) : Cplx(cos(2. * M_PI * r2), -sin(2. * M_PI * r2)) * (1. + 7.5 * coeff / k2) / potFT(k)) * sqrt(-2. * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
+					potFT(k) = (ignorekernel? Cplx(cos(2.0f * M_PI * r2), -sin(2.0f * M_PI * r2)) : Cplx(cos(2.0f * M_PI * r2), -sin(2.0f * M_PI * r2)) * (1.0f + 7.5f * static_cast<float>(coeff) / k2) / potFT(k)) * sqrt(-2.0f * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
 				}
 								
-				prng.discard(huge_skip - (uint64_t) i);
+				//prng.discard(huge_skip - (uint64_t) i);
 			}
-			prng.discard(huge_skip * (huge_skip - (uint64_t) j));
+			//prng.discard(huge_skip * (huge_skip - (uint64_t) (kyend - kymin + 1)));
+		}
+
+		gsl_interp_accel_free(acc);
 		}
 	}
 	
 	if (kymax >= (linesize / 2) + 1 && kzmax >= (linesize / 2) + 1)
 	{
-		prng.seed(seed);
-		prng.discard(((huge_skip + huge_skip + huge_skip + (uint64_t) (linesize - kzmax)) * huge_skip + (uint64_t) (linesize - kymax)) * huge_skip);
+		//prng.seed(seed);
+		//prng.discard(((huge_skip + huge_skip + huge_skip + (uint64_t) (linesize - kzmax)) * huge_skip + (uint64_t) (linesize - kymax)) * huge_skip);
+
+		kyend = (linesize / 2 >= kymin) ? (linesize / 2) + 1 : kymin;
 		
-		for (kz = kzmax; kz >= (linesize / 2) + 1 && kz >= kzmin; kz--)
+		#pragma omp parallel default(shared) private(acc, kx, k2, r1, r2, s) firstprivate(prng, k)
 		{
-			for (ky = kymax, j = 0; ky >= (linesize / 2) + 1 && ky >= kymin; ky--, j++)
+		acc = gsl_interp_accel_alloc();
+
+		#pragma omp for collapse(2)
+		for (int kz = kzmax; kz >= kzend; kz--)
+		{
+			for (int ky = kymax; ky >= kyend; ky--)
 			{
-				for (kx = 1, i = 0; kx < (linesize / 2) + 1; kx++)
+				prng.seed(seed);
+				prng.discard(((huge_skip + huge_skip + huge_skip + (uint64_t) (linesize - kz)) * huge_skip + (uint64_t) (linesize - ky)) * huge_skip);
+
+				//i = 0;
+				for (kx = 1; kx < (linesize / 2) + 1; kx++)
 				{
 					k.setCoord(kx, ky, kz);
 					
 					k2 = (float) (kx * kx) + (float) ((linesize-ky) * (linesize-ky)) + (float) ((linesize-kz) * (linesize-kz));
 					
-					if (kx >= kmax || (linesize-ky) >= kmax || (linesize-kz) >= kmax || (k2 >= kmax * kmax && ksphere > 0))
+					if (kx >= kmax || (linesize-ky) >= kmax || (linesize-kz) >= kmax || (k2 >= kmax2 && ksphere > 0))
 					{
-						potFT(k) = Cplx(0., 0.);
+						potFT(k) = Cplx(0, 0);
 					}
 					else
 					{
 						s = sinc[kx] * sinc[linesize-ky] * sinc[linesize-kz];
-						k2 *= 4. * M_PI * M_PI;
+						k2 *= 4.0f * M_PI * M_PI;
 						do
 						{
 							r1 = (float) prng() / (float) sitmo::prng_engine::max();
-							i++;
+							//i++;
 						}
-						while (r1 == 0.);
+						while (r1 == 0);
 						r2 = (float) prng() / (float) sitmo::prng_engine::max();
-						i++;
+						//i++;
 					
-						potFT(k) = (ignorekernel ? Cplx(cos(2. * M_PI * r2), sin(2. * M_PI * r2)) : Cplx(cos(2. * M_PI * r2), sin(2. * M_PI * r2)) * (1. + 7.5 * coeff / k2) / potFT(k)) * sqrt(-2. * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
+						potFT(k) = (ignorekernel ? Cplx(cos(2.0f * M_PI * r2), sin(2.0f * M_PI * r2)) : Cplx(cos(2.0f * M_PI * r2), sin(2.0f * M_PI * r2)) * (1.0f + 7.5f * static_cast<float>(coeff) / k2) / potFT(k)) * sqrt(-2.0f * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
 					}
 				}
-				prng.discard(huge_skip - (uint64_t) i);
+				//prng.discard(huge_skip - (uint64_t) i);
 			}
-			prng.discard(huge_skip * (huge_skip - (uint64_t) j));
+			//prng.discard(huge_skip * (huge_skip - (uint64_t) (kymax - kyend + 1)));
 		}
 		
-		prng.seed(seed);
-		prng.discard(((huge_skip + huge_skip + (uint64_t) (linesize - kzmax)) * huge_skip + (uint64_t) (linesize - kymax)) * huge_skip);
+		//prng.seed(seed);
+		//prng.discard(((huge_skip + huge_skip + (uint64_t) (linesize - kzmax)) * huge_skip + (uint64_t) (linesize - kymax)) * huge_skip);
 		kx = 0;
 		
-		for (kz = kzmax; kz >= (linesize / 2) + 1 && kz >= kzmin; kz--)
+		#pragma omp for collapse(2)
+		for (int kz = kzmax; kz >= kzend; kz--)
 		{
-			for (ky = kymax, j = 0; ky >= (linesize / 2) + 1 && ky >= kymin; ky--, j++)
+			for (int ky = kymax; ky >= kyend; ky--)
 			{
+				prng.seed(seed);
+				prng.discard(((huge_skip + huge_skip + (uint64_t) (linesize - kz)) * huge_skip + (uint64_t) (linesize - ky)) * huge_skip);
+
 				k.setCoord(kx, ky, kz);
 					
 				k2 = (float) ((linesize-ky) * (linesize-ky)) + (float) ((linesize-kz) * (linesize-kz));
-				i = 0;
+				//i = 0;
 				
-				if ((linesize-ky) >= kmax || (linesize-kz) >= kmax || (k2 >= kmax * kmax && ksphere > 0))
+				if ((linesize-ky) >= kmax || (linesize-kz) >= kmax || (k2 >= kmax2 && ksphere > 0))
 				{
-					potFT(k) = Cplx(0., 0.);
+					potFT(k) = Cplx(0, 0);
 				}
 				else
 				{
 					s = sinc[linesize-ky] * sinc[linesize-kz];
-					k2 *= 4. * M_PI * M_PI;
+					k2 *= 4.0f * M_PI * M_PI;
 					do
 					{
 						r1 = (float) prng() / (float) sitmo::prng_engine::max();
-						i++;
+						//i++;
 					}
-					while (r1 == 0.);
+					while (r1 == 0);
 					r2 = (float) prng() / (float) sitmo::prng_engine::max();
-					i++;
+					//i++;
 				
-					potFT(k) = (ignorekernel ? Cplx(cos(2. * M_PI * r2), -sin(2. * M_PI * r2)) : Cplx(cos(2. * M_PI * r2), -sin(2. * M_PI * r2)) * (1. + 7.5 * coeff / k2) / potFT(k)) * sqrt(-2. * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
+					potFT(k) = (ignorekernel ? Cplx(cos(2.0f * M_PI * r2), -sin(2.0f * M_PI * r2)) : Cplx(cos(2.0f * M_PI * r2), -sin(2.0f * M_PI * r2)) * (1.0f + 7.5f * static_cast<float>(coeff) / k2) / potFT(k)) * sqrt(-2.0f * log(r1)) * gsl_spline_eval(pkspline, sqrt(k2), acc) * s;
 				}
 				
-				prng.discard(huge_skip - (uint64_t) i);
+				//prng.discard(huge_skip - (uint64_t) i);
 			}
-			prng.discard(huge_skip * (huge_skip - (uint64_t) j));
+			//prng.discard(huge_skip * (huge_skip - (uint64_t) (kymax - kyend + 1)));
+		}
+
+		gsl_interp_accel_free(acc);
 		}
 	}
-	
-	gsl_interp_accel_free(acc);
-	free(sinc);
+
+	if (linesize > STACK_ALLOCATION_LIMIT)
+		free(sinc);
+
+	nvtxRangePop();
 }
 #endif
 

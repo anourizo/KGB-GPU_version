@@ -54,9 +54,9 @@ run: $(EXEC)
 profile: $(EXEC)
 	rsync -av ./$(EXEC) /capstor/scratch/cscs/adamek/testing/.
 	export LD_LIBRARY_PATH=$$LD_LIBRARY_PATH:/users/adamek/local_arm/lib
-	export OMP_NUM_THREADS=9
+	export OMP_NUM_THREADS=36
 	export OMP_PLACES=cores
-	srun -N 2 -n 64 --cpus-per-task=9 -C gpu -A sm97 --time=12:00 --partition=debug --hint=exclusive --cpu-bind=socket ./mps-wrapper.sh ./nsys_wrapper.sh /capstor/scratch/cscs/adamek/testing/$(EXEC) -n 8 -m 8 -s /capstor/scratch/cscs/adamek/testing/benchmark.ini
+	srun -N 2 -n 16 --cpus-per-task=36 -C gpu -A sm97 --time=12:00 --partition=debug --hint=exclusive --cpu-bind=socket ./mps-wrapper.sh ./nsys_wrapper.sh /capstor/scratch/cscs/adamek/testing/$(EXEC) -n 4 -m 4 -s /capstor/scratch/cscs/adamek/testing/benchmark.ini
 
 clean:
 	-rm -f $(EXEC) lccat lcmap unit-tests

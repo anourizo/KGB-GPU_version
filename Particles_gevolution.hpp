@@ -401,7 +401,11 @@ __host__ __device__ void perfParticles_gevolution<part,part_info>::bufferTracerP
 	else
 	{
 		for (int i = 0; i < 3; i++)
+#ifdef SINGLE
 			posdata[3*buffer_idx+i] = modff(float(1) + static_cast<float>(this->row_buffers_[row].p[3*idx+i] + static_cast<Real>(dtau_pos) * this->row_buffers_[row].q[3*idx+i] * frac[1] / frac[2]), static_cast<float *>(&phip)) * static_cast<float>(boxsize);
+#else
+			posdata[3*buffer_idx+i] = static_cast<float>(modf(double(1) + static_cast<double>(this->row_buffers_[row].p[3*idx+i] + static_cast<Real>(dtau_pos) * this->row_buffers_[row].q[3*idx+i] * frac[1] / frac[2]), static_cast<double *>(&phip)) * static_cast<double>(boxsize));
+#endif
 	}
 		
 	for (int i = 0; i < 3; i++)
@@ -1613,7 +1617,15 @@ __global__ void add_particles(perfParticles_gevolution<part, part_info> * pcl, f
 	{
 		int coord[3];
 
+#ifdef SINGLE
 		pcl->getPartCoordLocal(posdata+3*i, coord);
+#else
+		double pos[3];
+		pos[0] = posdata[3*i];
+		pos[1] = posdata[3*i+1];
+		pos[2] = posdata[3*i+2];
+		pcl->getPartCoordLocal(pos, coord);
+#endif
 
 		if (coord[0] >= 0 && coord[0] < pcl->lat_size_local_[0] && coord[1] >= 0 && coord[1] < pcl->lat_size_local_[1] && coord[2] >= 0 && coord[2] < pcl->lat_size_local_[2])
 		{
@@ -1749,7 +1761,15 @@ void perfParticles_gevolution<part,part_info>::loadGadget2(string filename, gadg
 			{
 				int coord[3];
 				Site x(*(this->lat_));
+#ifdef SINGLE
 				this->getPartCoord(posdata+3*i, coord);
+#else
+				double pos[3];
+				pos[0] = posdata[3*i];
+				pos[1] = posdata[3*i+1];
+				pos[2] = posdata[3*i+2];
+				this->getPartCoord(pos, coord);
+#endif
 				if (x.setCoord(coord))
 				{
 					local_count++;

@@ -95,8 +95,10 @@ int main(int argc, char **argv)
 #endif  //BENCHMARK
 	
 	int n = 0, m = 0;
+#ifdef EXTERNAL_IO
 	int io_size = 0;
 	int io_group_size = 0;
+#endif
 	
 	int cycle = 0, snapcount = 0, pkcount = 0, restartcount = 0, usedparams, numparam = 0, numspecies, done_hij;
 	int numsteps_ncdm[MAX_PCL_SPECIES-2];
@@ -149,15 +151,17 @@ int main(int argc, char **argv)
 #ifndef EXTERNAL_IO
 				cout << "EXTERNAL_IO needs to be set at compilation to use the I/O server"<<endl;
 				exit(-1000);
-#endif
+#else
 				io_size =  atoi(argv[++i]);
+#endif
 				break;
 			case 'g':
 #ifndef EXTERNAL_IO
 				cout << "EXTERNAL_IO needs to be set at compilation to use the I/O server"<<endl;
 				exit(-1000);
-#endif
+#else
 				io_group_size = atoi(argv[++i]);
+#endif
 		}
 	}
 
@@ -249,7 +253,9 @@ int main(int argc, char **argv)
 	
 	perfParticles_gevolution<part_simple,part_simple_info> pcls_cdm;
 	perfParticles_gevolution<part_simple,part_simple_info> pcls_b;
-	Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> pcls_ncdm[MAX_PCL_SPECIES-2];
+	Particles_gevolution<part_simple,part_simple_info,part_simple_dataType> * pcls_ncdm = nullptr;
+	if (cosmo.num_ncdm > 0) pcls_ncdm = new Particles_gevolution<part_simple,part_simple_info,part_simple_dataType>[cosmo.num_ncdm];
+
 	Field<Real> * update_cdm_fields[3];
 	Field<Real> * update_b_fields[3];
 	Field<Real> * update_ncdm_fields[3];
@@ -1254,6 +1260,10 @@ delete [] IDbacklog;
 		ioserver.stop();
 	}
 #endif
+
+	if (cosmo.num_ncdm > 0) delete[] pcls_ncdm;
+
+	parallel.finalize();
 
 	return 0;
 }

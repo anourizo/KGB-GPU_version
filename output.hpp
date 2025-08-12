@@ -696,8 +696,8 @@ __global__ void project_metric_to_healpix_batch(Real * pixbuf_phi, Real * pixbuf
 
 void create_packmap(int64_t * packmap, int64_t pix, int pixbatch_size, int64_t nside, int64_t npix)
 {
-	int q = 0;
 	int64_t * temp = (int64_t *) alloca(pixbatch_size * sizeof(int64_t));
+	int q = 0;
 
 #pragma omp parallel for
 	for (int i = 0; i < pixbatch_size; i++)

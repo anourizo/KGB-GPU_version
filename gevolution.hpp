@@ -121,7 +121,7 @@ void prepareFTsource(Field<Real> & phi, Field<Real> & Tij, Field<Real> & Sij, co
 	int block_x = phi.lattice().sizeLocal(1);
 	int block_y = phi.lattice().sizeLocal(2);
 
-	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepareFTsource_Tij_functor(), numpts, fields, 3, &params, nullptr, nullptr, 0);
+	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepareFTsource_Tij_functor(), numpts, fields, 3, &params, nullptr, nullptr);
 
 	cudaDeviceSynchronize();
 
@@ -232,11 +232,12 @@ void prepareFTsource(Field<Real> & phi, Field<Real> & Tij, Field<Real> & Sij, co
 //   coeff3     scaling coefficient for the psi-term ("3 H_conformal^2 dx^2")
 //
 // Returns:
-// 
+//   sum of the source field
 //////////////////////////
 
 __host__ __device__ void prepareFTsource_T00(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
 {
+	outputs[0] = (*fields[1])(sites[1]);
 	(*fields[0])(sites[0]) = params[2] * ((*fields[1])(sites[1]) - params[0]);
 #ifdef PHINONLINEAR
 	(*fields[0])(sites[0]) *= Real(1) - Real(2) * (*fields[2])(sites[2]) * (Real(1) - (*fields[2])(sites[2]));
@@ -257,18 +258,40 @@ struct prepareFTsource_T00_functor
 	}
 };
 
-void prepareFTsource(Field<Real> & phi, Field<Real> & chi, Field<Real> & source, const double bgmodel, Field<Real> & result, const double coeff, const double coeff2, const double coeff3)
+double prepareFTsource(Field<Real> & phi, Field<Real> & chi, Field<Real> & source, const double bgmodel, Field<Real> & result, const double coeff, const double coeff2, const double coeff3)
 {
 	Field<Real> * fields[4] = {&result, &source, &phi, &chi};
 	double params[4] = {bgmodel, coeff, coeff2, coeff3};
+	double sum = 0.;
+	int reduce = SUM;
+
+	double * d_params;
+	double * d_sum;
+	int * d_reduce;
+
+	cudaMalloc(&d_params, 4 * sizeof(double));
+	cudaMalloc(&d_sum, sizeof(double));
+	cudaMalloc(&d_reduce, sizeof(int));
+	cudaMemcpy(d_params, params, 4 * sizeof(double), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_sum, &sum, sizeof(double), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_reduce, &reduce, sizeof(int), cudaMemcpyHostToDevice);
 
 	int numpts = result.lattice().sizeLocal(0);
 	int block_x = result.lattice().sizeLocal(1);
 	int block_y = result.lattice().sizeLocal(2);
 
-	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepareFTsource_T00_functor(), numpts, fields, 4, params, nullptr, nullptr, 0);
+	lattice_for_each<prepareFTsource_T00_functor, 1><<<dim3(block_x, block_y), 128, 4*sizeof(double)>>>(prepareFTsource_T00_functor(), numpts, fields, 4, d_params, d_sum, d_reduce);
 
 	cudaDeviceSynchronize();
+
+	cudaMemcpy(&sum, d_sum, sizeof(double), cudaMemcpyDeviceToHost);
+	cudaFree(d_params);
+	cudaFree(d_sum);
+	cudaFree(d_reduce);
+
+	parallel.sum<double>(sum);
+
+	return sum;
 
 /*	Site x(phi.lattice());
 	

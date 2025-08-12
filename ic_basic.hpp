@@ -1168,7 +1168,7 @@ void generateDisplacementField(Field<Cplx> & potFT, const Real coeff, const gsl_
 	uint64_t huge_skip = HUGE_SKIP;
 	gsl_interp_accel * acc;
 
-	if (ignorekernel == 0)
+	if constexpr (ignorekernel == 0)
 	{
 		nvtxRangePushA("generateDisplacementField");
 	}

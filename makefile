@@ -49,7 +49,9 @@ run-tests: unit-tests
 
 run: $(EXEC)
 	rsync -av ./$(EXEC) /capstor/scratch/cscs/adamek/testing/.
-	srun -N 1 -n 4 -C gpu -A sm97 --time=5:00 --partition=debug /capstor/scratch/cscs/adamek/testing/$(EXEC) -n 2 -m 2 -s /capstor/scratch/cscs/adamek/testing/settings.ini
+	export OMP_NUM_THREADS=36
+	export OMP_PLACES=cores
+	srun -N 1 -n 8 --cpus-per-task=36 -C gpu -A sm97 --time=5:00 --partition=debug --hint=exclusive --cpu-bind=socket ./mps-wrapper.sh /capstor/scratch/cscs/adamek/testing/$(EXEC) -n 4 -m 2 -s /capstor/scratch/cscs/adamek/testing/settings.ini
 
 profile: $(EXEC)
 	rsync -av ./$(EXEC) /capstor/scratch/cscs/adamek/testing/.

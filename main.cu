@@ -115,7 +115,7 @@ int main(int argc, char **argv)
 	metadata sim;
 	cosmology cosmo;
 	icsettings ic;
-	double T00hom;
+	double T00hom = 0.;
 	Real phi_hom;
 
 #ifdef ANISOTROPIC_EXPANSION
@@ -608,22 +608,17 @@ int main(int argc, char **argv)
 		nvtxRangePushA("Solve phi");
 		if (sim.gr_flag > 0)
 		{
-			T00hom = 0.;
-			for (x.first(); x.test(); x.next())
-				T00hom += source(x);
-			parallel.sum<double>(T00hom);
-			T00hom /= (double) numpts3d;
+			if (dtau_old > 0.)
+			{
+				nvtxRangePushA("prepareFTsource");
+				T00hom = prepareFTsource(phi, chi, source, cosmo.Omega_cdm + cosmo.Omega_b + bg_ncdm(a, cosmo), source, 3. * Hconf(a, fourpiG, cosmo) * dx * dx / dtau_old, fourpiG * dx * dx / a, 3. * Hconf(a, fourpiG, cosmo) * Hconf(a, fourpiG, cosmo) * dx * dx);  // prepare nonlinear source for phi update
+				T00hom /= (double) numpts3d;
+				nvtxRangePop();
+			}
 			
 			if (cycle % CYCLE_INFO_INTERVAL == 0)
 			{
 				COUT << " cycle " << cycle << ", background information: z = " << (1./a) - 1. << ", average T00 = " << T00hom << ", background model = " << cosmo.Omega_cdm + cosmo.Omega_b + bg_ncdm(a, cosmo) << endl;
-			}
-			
-			if (dtau_old > 0.)
-			{
-				nvtxRangePushA("prepareFTsource");
-				prepareFTsource(phi, chi, source, cosmo.Omega_cdm + cosmo.Omega_b + bg_ncdm(a, cosmo), source, 3. * Hconf(a, fourpiG, cosmo) * dx * dx / dtau_old, fourpiG * dx * dx / a, 3. * Hconf(a, fourpiG, cosmo) * Hconf(a, fourpiG, cosmo) * dx * dx);  // prepare nonlinear source for phi update
-				nvtxRangePop();
 			}
 		}
 

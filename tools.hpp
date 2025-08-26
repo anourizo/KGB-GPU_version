@@ -13,6 +13,8 @@
 #ifndef TOOLS_HEADER
 #define TOOLS_HEADER
 
+#include "lattice_loop.hpp"
+
 #ifndef Cplx
 #define Cplx Imag
 #endif
@@ -52,7 +54,7 @@ using namespace LATfield2;
 
 void extractCrossSpectrum(Field<Cplx> & fld1FT, Field<Cplx> & fld2FT, Real * kbin, Real * power, Real * kscatter, Real * pscatter, int * occupation, const int numbins, const bool deconvolve = true, const int ktype = KTYPE_LINEAR, const int comp1 = -1, const int comp2 = -1)
 {
-	int i, weight;
+	int weight, bin;
 	const int linesize = fld1FT.lattice().size(1);
 	Real * typek2;
 	Real * sinc;
@@ -60,12 +62,21 @@ void extractCrossSpectrum(Field<Cplx> & fld1FT, Field<Cplx> & fld2FT, Real * kbi
 	rKSite k(fld1FT.lattice());
 	Cplx p;
 	
-	typek2 = (Real *) malloc(linesize * sizeof(Real));
-	sinc = (Real *) malloc(linesize * sizeof(Real));
+	if (linesize <= STACK_ALLOCATION_LIMIT)
+	{
+		typek2 = (Real *) alloca(linesize * sizeof(Real));
+		sinc = (Real *) alloca(linesize * sizeof(Real));
+	}
+	else
+	{
+		typek2 = (Real *) malloc(linesize * sizeof(Real));
+		sinc = (Real *) malloc(linesize * sizeof(Real));
+	}
 	
 	if (ktype == KTYPE_GRID)
 	{
-		for (i = 0; i < linesize; i++)
+#pragma omp parallel for
+		for (int i = 0; i < linesize; i++)
 		{
 			typek2[i] = 2. * (Real) linesize * sin(M_PI * (Real) i / (Real) linesize);
 			typek2[i] *= typek2[i];
@@ -73,12 +84,14 @@ void extractCrossSpectrum(Field<Cplx> & fld1FT, Field<Cplx> & fld2FT, Real * kbi
 	}
 	else
 	{
-		for (i = 0; i <= linesize/2; i++)
+#pragma omp parallel for
+		for (int i = 0; i <= linesize/2; i++)
 		{
 			typek2[i] = 2. * M_PI * (Real) i;
 			typek2[i] *= typek2[i];
 		}
-		for (; i < linesize; i++)
+#pragma omp parallel for
+		for (int i = linesize/2 + 1; i < linesize; i++)
 		{
 			typek2[i] = 2. * M_PI * (Real) (linesize-i);
 			typek2[i] *= typek2[i];
@@ -88,26 +101,29 @@ void extractCrossSpectrum(Field<Cplx> & fld1FT, Field<Cplx> & fld2FT, Real * kbi
 	sinc[0] = 1.;
 	if (deconvolve)
 	{
-		for (i = 1; i <= linesize / 2; i++)
+#pragma omp parallel for
+		for (int i = 1; i <= linesize/2; i++)
 		{
 			sinc[i] = sin(M_PI * (float) i / (float) linesize) * (float) linesize / (M_PI * (float) i);
 		}
 	}
 	else
 	{
-		for (i = 1; i <= linesize / 2; i++)
+#pragma omp parallel for
+		for (int i = 1; i <= linesize/2; i++)
 		{
 			sinc[i] = 1.;
 		}
 	}
-	for (; i < linesize; i++)
+#pragma omp parallel for
+	for (int i = linesize/2 + 1; i < linesize; i++)
 	{
 		sinc[i] = sinc[linesize-i];
 	}
 	
 	k2max = 3. * typek2[linesize/2];
 	
-	for (i = 0; i < numbins; i++)
+	for (int i = 0; i < numbins; i++)
 	{
 		kbin[i] = 0.;
 		power[i] = 0.;
@@ -116,55 +132,80 @@ void extractCrossSpectrum(Field<Cplx> & fld1FT, Field<Cplx> & fld2FT, Real * kbi
 		occupation[i] = 0;
 	}
 	
-	for (k.first(); k.test(); k.next())
+//	for (k.first(); k.test(); k.next())
+//	{
+#pragma omp parallel for collapse(2) default(shared) firstprivate(k) private(weight, p, k2, s, bin)
+	for (int ii = 0; ii < fld1FT.lattice().sizeLocal(1); ii++)
 	{
-		if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
-			continue;
-		else if (k.coord(0) == 0)
-			weight = 1;
-		else if ((k.coord(0) == linesize/2) && (linesize % 2 == 0))
-			weight = 1;
-		else
-			weight = 2;
-			
-		k2 = typek2[k.coord(0)] + typek2[k.coord(1)] + typek2[k.coord(2)];
-		s = sinc[k.coord(0)] * sinc[k.coord(1)] * sinc[k.coord(2)];
-		s *= s;
-		
-		if (comp1 >= 0 && comp2 >= 0 && comp1 < fld1FT.components() && comp2 < fld2FT.components())
+		for (int jj = 0; jj < fld1FT.lattice().sizeLocal(2); jj++)
 		{
-			p = fld1FT(k, comp1) * fld2FT(k, comp2).conj();
-		}
-		else if (fld1FT.symmetry() == LATfield2::symmetric)
-		{
-			p = fld1FT(k, 0, 1) * fld2FT(k, 0, 1).conj();
-			p += fld1FT(k, 0, 2) * fld2FT(k, 0, 2).conj();
-			p += fld1FT(k, 1, 2) * fld2FT(k, 1, 2).conj();
-			p *= 2.;
-			p += fld1FT(k, 0, 0) * fld2FT(k, 0, 0).conj();
-			p += fld1FT(k, 1, 1) * fld2FT(k, 1, 1).conj();
-			p += fld1FT(k, 2, 2) * fld2FT(k, 2, 2).conj();
-		}
-		else
-		{
-			p = Cplx(0., 0.);
-			for (i = 0; i < fld1FT.components(); i++)
-				p += fld1FT(k, i) * fld2FT(k, i).conj();
-		}
-		
-		i = (int) floor((double) ((Real) numbins * sqrt(k2 / k2max)));
-		if (i < numbins) 
-		{
-			kbin[i] += weight * sqrt(k2);
-			kscatter[i] += weight * k2;
-			power[i] += weight * p.real() * k2 * sqrt(k2) / s;
-			pscatter[i] += weight * p.real() * p.real() * k2 * k2 * k2 / s / s;
-			occupation[i] += weight;
+			if (!k.setCoord(0, jj + fld1FT.lattice().coordSkip()[0], ii + fld1FT.lattice().coordSkip()[1]))
+			{
+				throw std::runtime_error("Error in projectFTscalar: Could not set coordinates.");
+			}
+
+			for (int z = 0; z < fld1FT.lattice().sizeLocal(0); z++)
+			{
+				if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
+				{
+					k.next();
+					continue;
+				}
+				else if (k.coord(0) == 0)
+					weight = 1;
+				else if ((k.coord(0) == linesize/2) && (linesize % 2 == 0))
+					weight = 1;
+				else
+					weight = 2;
+					
+				k2 = typek2[k.coord(0)] + typek2[k.coord(1)] + typek2[k.coord(2)];
+				s = sinc[k.coord(0)] * sinc[k.coord(1)] * sinc[k.coord(2)];
+				s *= s;
+				
+				if (comp1 >= 0 && comp2 >= 0 && comp1 < fld1FT.components() && comp2 < fld2FT.components())
+				{
+					p = fld1FT(k, comp1) * fld2FT(k, comp2).conj();
+				}
+				else if (fld1FT.symmetry() == LATfield2::symmetric)
+				{
+					p = fld1FT(k, 0, 1) * fld2FT(k, 0, 1).conj();
+					p += fld1FT(k, 0, 2) * fld2FT(k, 0, 2).conj();
+					p += fld1FT(k, 1, 2) * fld2FT(k, 1, 2).conj();
+					p *= 2.;
+					p += fld1FT(k, 0, 0) * fld2FT(k, 0, 0).conj();
+					p += fld1FT(k, 1, 1) * fld2FT(k, 1, 1).conj();
+					p += fld1FT(k, 2, 2) * fld2FT(k, 2, 2).conj();
+				}
+				else
+				{
+					p = Cplx(0., 0.);
+					for (int i = 0; i < fld1FT.components(); i++)
+						p += fld1FT(k, i) * fld2FT(k, i).conj();
+				}
+
+				bin = (int) floor((double) ((Real) numbins * sqrt(k2 / k2max)));
+				if (bin < numbins) 
+				{
+					#pragma omp critical
+					{
+						kbin[bin] += weight * sqrt(k2);
+						kscatter[bin] += weight * k2;
+						power[bin] += weight * p.real() * k2 * sqrt(k2) / s;
+						pscatter[bin] += weight * p.real() * p.real() * k2 * k2 * k2 / s / s;
+						occupation[bin] += weight;
+					}
+				}
+
+				k.next();
+			}
 		}
 	}
 	
-	free(typek2);
-	free(sinc);
+	if (linesize > STACK_ALLOCATION_LIMIT)
+	{
+		free(typek2);
+		free(sinc);
+	}
 
 	if (parallel.isRoot())
 	{
@@ -181,7 +222,8 @@ void extractCrossSpectrum(Field<Cplx> & fld1FT, Field<Cplx> & fld2FT, Real * kbi
 #endif
 		MPI_Reduce(MPI_IN_PLACE, (void *) occupation, numbins, MPI_INT, MPI_SUM, 0, parallel.lat_world_comm());
 
-		for (i = 0; i < numbins; i++)
+#pragma omp parallel for
+		for (int i = 0; i < numbins; i++)
 		{
 			if (occupation[i] > 0)
 			{
@@ -363,16 +405,50 @@ void writePowerSpectrum(Real * kbin, Real * power, Real * kscatter, Real * pscat
 // 
 //////////////////////////
 
+__host__ __device__ void computeVectorDiagnostics_kernel(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+{
+	outputs[0] = fabs(((*fields[0])(sites[0],0)-(*fields[0])(sites[0]-0,0)) + ((*fields[0])(sites[0],1)-(*fields[0])(sites[0]-1,1)) + ((*fields[0])(sites[0],2)-(*fields[0])(sites[0]-2,2)));
+	Real b1 = ((*fields[0])(sites[0],0) + (*fields[0])(sites[0]+0,1) - (*fields[0])(sites[0]+1,0) - (*fields[0])(sites[0],1) + (*fields[0])(sites[0]+2,0) + (*fields[0])(sites[0]+0+2,1) - (*fields[0])(sites[0]+1+2,0) - (*fields[0])(sites[0]+2,1));
+	Real b2 = ((*fields[0])(sites[0],0) + (*fields[0])(sites[0]+0,2) - (*fields[0])(sites[0]+2,0) - (*fields[0])(sites[0],2) + (*fields[0])(sites[0]+1,0) + (*fields[0])(sites[0]+0+1,2) - (*fields[0])(sites[0]+2+1,0) - (*fields[0])(sites[0]+1,2));
+	Real b3 = ((*fields[0])(sites[0],2) + (*fields[0])(sites[0]+2,1) - (*fields[0])(sites[0]+1,2) - (*fields[0])(sites[0],1) + (*fields[0])(sites[0]+0,2) + (*fields[0])(sites[0]+2+0,1) - (*fields[0])(sites[0]+1+0,2) - (*fields[0])(sites[0]+0,1));
+	outputs[1] = 0.5 * sqrt(b1 * b1 + b2 * b2 + b3 * b3);
+}
+
+struct computeVectorDiagnostics_functor
+{
+	__host__ __device__ void operator()(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+	{
+		computeVectorDiagnostics_kernel(fields, sites, nfields, params, outputs);
+	}
+};
+
 void computeVectorDiagnostics(Field<Real> & Bi, Real & mdivB, Real & mcurlB)
 {
-	Real b1, b2, b3, b4;
+	//Real b1, b2, b3, b4;
 	const Real linesize = (Real) Bi.lattice().sizeLocal(0);
-	Site x(Bi.lattice());
+	//Site x(Bi.lattice());
 	
-	mdivB = 0.;
-	mcurlB = 0.;
-	
-	for (x.first(); x.test(); x.next())
+	//mdivB = 0.;
+	//mcurlB = 0.;
+
+	Field<Real> * fieldptr = &Bi;
+	double result[2] = { 0., 0. };
+	int reduce[2] = { MAX, MAX };
+
+	int numpts = Bi.lattice().sizeLocal(0);
+	int block_x = Bi.lattice().sizeLocal(1);
+	int block_y = Bi.lattice().sizeLocal(2);
+
+	lattice_for_each<computeVectorDiagnostics_functor, 2><<<dim3(block_x, block_y), 128>>>(computeVectorDiagnostics_functor(), numpts, &fieldptr, 1, nullptr, result, reduce);
+
+	cudaDeviceSynchronize();
+
+	parallel.max<double>(result, 2);
+
+	mdivB = result[0] * linesize;
+	mcurlB = result[1] * linesize;
+
+	/*for (x.first(); x.test(); x.next())
 	{
 		b1 = fabs((Bi(x,0)-Bi(x-0,0)) + (Bi(x,1)-Bi(x-1,1)) + (Bi(x,2)-Bi(x-2,2))) * linesize;
 		if (b1 > mdivB) mdivB = b1;
@@ -384,7 +460,7 @@ void computeVectorDiagnostics(Field<Real> & Bi, Real & mdivB, Real & mcurlB)
 	}
 	
 	parallel.max<Real>(mdivB);
-	parallel.max<Real>(mcurlB);
+	parallel.max<Real>(mcurlB);*/
 }
 
 
@@ -404,17 +480,53 @@ void computeVectorDiagnostics(Field<Real> & Bi, Real & mdivB, Real & mcurlB)
 // 
 //////////////////////////
 
+__host__ __device__ void computeTensorDiagnostics_kernel(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+{
+	Real d1 = ((*fields[0])(sites[0]+0, 0, 0) - (*fields[0])(sites[0], 0, 0) + (*fields[0])(sites[0], 0, 1) - (*fields[0])(sites[0]-1, 0, 1) + (*fields[0])(sites[0], 0, 2) - (*fields[0])(sites[0]-2, 0, 2));
+	Real d2 = ((*fields[0])(sites[0]+1, 1, 1) - (*fields[0])(sites[0], 1, 1) + (*fields[0])(sites[0], 0, 1) - (*fields[0])(sites[0]-0, 0, 1) + (*fields[0])(sites[0], 1, 2) - (*fields[0])(sites[0]-2, 1, 2));
+	Real d3 = ((*fields[0])(sites[0]+2, 2, 2) - (*fields[0])(sites[0], 2, 2) + (*fields[0])(sites[0], 0, 2) - (*fields[0])(sites[0]-0, 0, 2) + (*fields[0])(sites[0], 1, 2) - (*fields[0])(sites[0]-1, 1, 2));
+	outputs[0] = sqrt(d1 * d1 + d2 * d2 + d3 * d3);
+	outputs[1] = fabs((*fields[0])(sites[0], 0, 0) + (*fields[0])(sites[0], 1, 1) + (*fields[0])(sites[0], 2, 2));
+	outputs[2] = sqrt((*fields[0])(sites[0], 0, 0) * (*fields[0])(sites[0], 0, 0) + Real(2) * (*fields[0])(sites[0], 0, 1) * (*fields[0])(sites[0], 0, 1) + Real(2) * (*fields[0])(sites[0], 0, 2)* (*fields[0])(sites[0], 0, 2) + (*fields[0])(sites[0], 1, 1) * (*fields[0])(sites[0], 1, 1) + Real(2) * (*fields[0])(sites[0], 1, 2) * (*fields[0])(sites[0], 1, 2) + (*fields[0])(sites[0], 2, 2) * (*fields[0])(sites[0], 2, 2));
+}
+
+struct computeTensorDiagnostics_functor
+{
+	__host__ __device__ void operator()(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+	{
+		computeTensorDiagnostics_kernel(fields, sites, nfields, params, outputs);
+	}
+};
+
 void computeTensorDiagnostics(Field<Real> & hij, Real & mdivh, Real & mtraceh, Real & mnormh)
 {
-	Real d1, d2, d3;
+	//Real d1, d2, d3;
 	const Real linesize = (Real) hij.lattice().sizeLocal(0);
-	Site x(hij.lattice());
+	//Site x(hij.lattice());
 	
-	mdivh = 0.;
-	mtraceh = 0.;
-	mnormh = 0.;
-	
-	for (x.first(); x.test(); x.next())
+	//mdivh = 0.;
+	//mtraceh = 0.;
+	//mnormh = 0.;
+
+	Field<Real> * fieldptr = &hij;
+	double result[3] = { 0., 0., 0. };
+	int reduce[3] = { MAX, MAX, MAX };
+
+	int numpts = hij.lattice().sizeLocal(0);
+	int block_x = hij.lattice().sizeLocal(1);
+	int block_y = hij.lattice().sizeLocal(2);
+
+	lattice_for_each<computeTensorDiagnostics_functor, 3><<<dim3(block_x, block_y), 128>>>(computeTensorDiagnostics_functor(), numpts, &fieldptr, 1, nullptr, result, reduce);
+
+	cudaDeviceSynchronize();
+
+	parallel.max<double>(result, 3);
+
+	mdivh = result[0] * linesize;
+	mtraceh = result[1];
+	mnormh = result[2];
+
+	/*for (x.first(); x.test(); x.next())
 	{
 		d1 = (hij(x+0, 0, 0) - hij(x, 0, 0) + hij(x, 0, 1) - hij(x-1, 0, 1) + hij(x, 0, 2) - hij(x-2, 0, 2)) * linesize;
 		d2 = (hij(x+1, 1, 1) - hij(x, 1, 1) + hij(x, 0, 1) - hij(x-0, 0, 1) + hij(x, 1, 2) - hij(x-2, 1, 2)) * linesize;
@@ -429,7 +541,7 @@ void computeTensorDiagnostics(Field<Real> & hij, Real & mdivh, Real & mtraceh, R
 	
 	parallel.max<Real>(mdivh);
 	parallel.max<Real>(mtraceh);
-	parallel.max<Real>(mnormh);
+	parallel.max<Real>(mnormh);*/
 }
 
 
@@ -491,158 +603,197 @@ int findIntersectingLightcones(lightcone_geometry & lightcone, double outer, dou
 	corner[7][1] = domain[4];
 	corner[7][2] = domain[5];
 
+#pragma omp parallel for collapse(3) default(shared) private(rdom, dist)
 	for (u = -range; u <= range; u++)
 	{
 		for (v = -range; v <= range; v++)
 		{
 			for (w = -range; w <= range; w++)
 			{
-				if (n >= MAX_INTERSECTS)
-				{
-					cout << COLORTEXT_YELLOW << " /!\\ warning" << COLORTEXT_RESET << ": maximum number of lightcone intersects exceeds MAX_INTERSECTS = " << MAX_INTERSECTS << " for domain (" << domain[0] << ", " << domain[1] << ", " << domain[2] << ") - (" << domain[3] << ", " << domain[4] << ", " << domain[5] << "); some data may be missing in output!" << endl;
-					return MAX_INTERSECTS;
-				}
-				vertex[n][0] = lightcone.vertex[0] + u;
-				vertex[n][1] = lightcone.vertex[1] + v;
-				vertex[n][2] = lightcone.vertex[2] + w;
+				double vertex_[3];
+				vertex_[0] = lightcone.vertex[0] + u;
+				vertex_[1] = lightcone.vertex[1] + v;
+				vertex_[2] = lightcone.vertex[2] + w;
 
 				// first, check if domain lies outside outer sphere
-				if (vertex[n][0] < domain[0])
+				if (vertex_[0] < domain[0])
 				{
-					if (vertex[n][1] < domain[1])
+					if (vertex_[1] < domain[1])
 					{
-						if (vertex[n][2] < domain[2])
+						if (vertex_[2] < domain[2])
 						{
-							if (sqrt((vertex[n][0]-corner[0][0])*(vertex[n][0]-corner[0][0]) + (vertex[n][1]-corner[0][1])*(vertex[n][1]-corner[0][1]) + (vertex[n][2]-corner[0][2])*(vertex[n][2]-corner[0][2])) > outer) continue;
+							if (sqrt((vertex_[0]-corner[0][0])*(vertex_[0]-corner[0][0]) + (vertex_[1]-corner[0][1])*(vertex_[1]-corner[0][1]) + (vertex_[2]-corner[0][2])*(vertex_[2]-corner[0][2])) > outer) continue;
 						}
-						else if (vertex[n][2] > domain[5])
+						else if (vertex_[2] > domain[5])
 						{
-							if (sqrt((vertex[n][0]-corner[4][0])*(vertex[n][0]-corner[4][0]) + (vertex[n][1]-corner[4][1])*(vertex[n][1]-corner[4][1]) + (vertex[n][2]-corner[4][2])*(vertex[n][2]-corner[4][2])) > outer) continue;
+							if (sqrt((vertex_[0]-corner[4][0])*(vertex_[0]-corner[4][0]) + (vertex_[1]-corner[4][1])*(vertex_[1]-corner[4][1]) + (vertex_[2]-corner[4][2])*(vertex_[2]-corner[4][2])) > outer) continue;
 						}
-						else if (sqrt((vertex[n][0]-domain[0])*(vertex[n][0]-domain[0]) + (vertex[n][1]-domain[1])*(vertex[n][1]-domain[1])) > outer) continue;
+						else if (sqrt((vertex_[0]-domain[0])*(vertex_[0]-domain[0]) + (vertex_[1]-domain[1])*(vertex_[1]-domain[1])) > outer) continue;
 					}
-					else if (vertex[n][1] > domain[4])
+					else if (vertex_[1] > domain[4])
 					{
-						if (vertex[n][2] < domain[2])
+						if (vertex_[2] < domain[2])
 						{
-							if (sqrt((vertex[n][0]-corner[2][0])*(vertex[n][0]-corner[2][0]) + (vertex[n][1]-corner[2][1])*(vertex[n][1]-corner[2][1]) + (vertex[n][2]-corner[2][2])*(vertex[n][2]-corner[2][2])) > outer) continue;
+							if (sqrt((vertex_[0]-corner[2][0])*(vertex_[0]-corner[2][0]) + (vertex_[1]-corner[2][1])*(vertex_[1]-corner[2][1]) + (vertex_[2]-corner[2][2])*(vertex_[2]-corner[2][2])) > outer) continue;
 						}
-						else if (vertex[n][2] > domain[5])
+						else if (vertex_[2] > domain[5])
 						{
-							if (sqrt((vertex[n][0]-corner[6][0])*(vertex[n][0]-corner[6][0]) + (vertex[n][1]-corner[6][1])*(vertex[n][1]-corner[6][1]) + (vertex[n][2]-corner[6][2])*(vertex[n][2]-corner[6][2])) > outer) continue;
+							if (sqrt((vertex_[0]-corner[6][0])*(vertex_[0]-corner[6][0]) + (vertex_[1]-corner[6][1])*(vertex_[1]-corner[6][1]) + (vertex_[2]-corner[6][2])*(vertex_[2]-corner[6][2])) > outer) continue;
 						}
-						else if (sqrt((vertex[n][0]-domain[0])*(vertex[n][0]-domain[0]) + (vertex[n][1]-domain[4])*(vertex[n][1]-domain[4])) > outer) continue;
+						else if (sqrt((vertex_[0]-domain[0])*(vertex_[0]-domain[0]) + (vertex_[1]-domain[4])*(vertex_[1]-domain[4])) > outer) continue;
 					}
 					else
 					{
-						if (vertex[n][2] < domain[2])
+						if (vertex_[2] < domain[2])
 						{
-							if (sqrt((vertex[n][0]-domain[0])*(vertex[n][0]-domain[0]) + (vertex[n][2]-domain[2])*(vertex[n][2]-domain[2])) > outer) continue;
+							if (sqrt((vertex_[0]-domain[0])*(vertex_[0]-domain[0]) + (vertex_[2]-domain[2])*(vertex_[2]-domain[2])) > outer) continue;
 						}
-						else if (vertex[n][2] > domain[5])
+						else if (vertex_[2] > domain[5])
 						{
-							if (sqrt((vertex[n][0]-domain[0])*(vertex[n][0]-domain[0]) + (vertex[n][2]-domain[5])*(vertex[n][2]-domain[5])) > outer) continue;
+							if (sqrt((vertex_[0]-domain[0])*(vertex_[0]-domain[0]) + (vertex_[2]-domain[5])*(vertex_[2]-domain[5])) > outer) continue;
 						}
-						else if (domain[0]-vertex[n][0] > outer) continue;
+						else if (domain[0]-vertex_[0] > outer) continue;
 					}
 				}
-				else if (vertex[n][0] > domain[3])
+				else if (vertex_[0] > domain[3])
 				{
-					if (vertex[n][1] < domain[1])
+					if (vertex_[1] < domain[1])
 					{
-						if (vertex[n][2] < domain[2])
+						if (vertex_[2] < domain[2])
 						{
-							if (sqrt((vertex[n][0]-corner[1][0])*(vertex[n][0]-corner[1][0]) + (vertex[n][1]-corner[1][1])*(vertex[n][1]-corner[1][1]) + (vertex[n][2]-corner[1][2])*(vertex[n][2]-corner[1][2])) > outer) continue;
+							if (sqrt((vertex_[0]-corner[1][0])*(vertex_[0]-corner[1][0]) + (vertex_[1]-corner[1][1])*(vertex_[1]-corner[1][1]) + (vertex_[2]-corner[1][2])*(vertex_[2]-corner[1][2])) > outer) continue;
 						}
-						else if (vertex[n][2] > domain[5])
+						else if (vertex_[2] > domain[5])
 						{
-							if (sqrt((vertex[n][0]-corner[5][0])*(vertex[n][0]-corner[5][0]) + (vertex[n][1]-corner[5][1])*(vertex[n][1]-corner[5][1]) + (vertex[n][2]-corner[5][2])*(vertex[n][2]-corner[5][2])) > outer) continue;
+							if (sqrt((vertex_[0]-corner[5][0])*(vertex_[0]-corner[5][0]) + (vertex_[1]-corner[5][1])*(vertex_[1]-corner[5][1]) + (vertex_[2]-corner[5][2])*(vertex_[2]-corner[5][2])) > outer) continue;
 						}
-						else if (sqrt((vertex[n][0]-domain[3])*(vertex[n][0]-domain[3]) + (vertex[n][1]-domain[1])*(vertex[n][1]-domain[1])) > outer) continue;
+						else if (sqrt((vertex_[0]-domain[3])*(vertex_[0]-domain[3]) + (vertex_[1]-domain[1])*(vertex_[1]-domain[1])) > outer) continue;
 					}
-					else if (vertex[n][1] > domain[4])
+					else if (vertex_[1] > domain[4])
 					{
-						if (vertex[n][2] < domain[2])
+						if (vertex_[2] < domain[2])
 						{
-							if (sqrt((vertex[n][0]-corner[3][0])*(vertex[n][0]-corner[3][0]) + (vertex[n][1]-corner[3][1])*(vertex[n][1]-corner[3][1]) + (vertex[n][2]-corner[3][2])*(vertex[n][2]-corner[3][2])) > outer) continue;
+							if (sqrt((vertex_[0]-corner[3][0])*(vertex_[0]-corner[3][0]) + (vertex_[1]-corner[3][1])*(vertex_[1]-corner[3][1]) + (vertex_[2]-corner[3][2])*(vertex_[2]-corner[3][2])) > outer) continue;
 						}
-						else if (vertex[n][2] > domain[5])
+						else if (vertex_[2] > domain[5])
 						{
-							if (sqrt((vertex[n][0]-corner[7][0])*(vertex[n][0]-corner[7][0]) + (vertex[n][1]-corner[7][1])*(vertex[n][1]-corner[7][1]) + (vertex[n][2]-corner[7][2])*(vertex[n][2]-corner[7][2])) > outer) continue;
+							if (sqrt((vertex_[0]-corner[7][0])*(vertex_[0]-corner[7][0]) + (vertex_[1]-corner[7][1])*(vertex_[1]-corner[7][1]) + (vertex_[2]-corner[7][2])*(vertex_[2]-corner[7][2])) > outer) continue;
 						}
-						else if (sqrt((vertex[n][0]-domain[3])*(vertex[n][0]-domain[3]) + (vertex[n][1]-domain[4])*(vertex[n][1]-domain[4])) > outer) continue;
+						else if (sqrt((vertex_[0]-domain[3])*(vertex_[0]-domain[3]) + (vertex_[1]-domain[4])*(vertex_[1]-domain[4])) > outer) continue;
 					}
 					else
 					{
-						if (vertex[n][2] < domain[2])
+						if (vertex_[2] < domain[2])
 						{
-							if (sqrt((vertex[n][0]-domain[3])*(vertex[n][0]-domain[3]) + (vertex[n][2]-domain[2])*(vertex[n][2]-domain[2])) > outer) continue;
+							if (sqrt((vertex_[0]-domain[3])*(vertex_[0]-domain[3]) + (vertex_[2]-domain[2])*(vertex_[2]-domain[2])) > outer) continue;
 						}
-						else if (vertex[n][2] > domain[5])
+						else if (vertex_[2] > domain[5])
 						{
-							if (sqrt((vertex[n][0]-domain[3])*(vertex[n][0]-domain[3]) + (vertex[n][2]-domain[5])*(vertex[n][2]-domain[5])) > outer) continue;
+							if (sqrt((vertex_[0]-domain[3])*(vertex_[0]-domain[3]) + (vertex_[2]-domain[5])*(vertex_[2]-domain[5])) > outer) continue;
 						}
-						else if (vertex[n][0]-domain[3] > outer) continue;
+						else if (vertex_[0]-domain[3] > outer) continue;
 					}
 				}
 				else
 				{
-					if (vertex[n][1] < domain[1])
+					if (vertex_[1] < domain[1])
 					{
-						if (vertex[n][2] < domain[2])
+						if (vertex_[2] < domain[2])
 						{
-							if (sqrt((vertex[n][1]-domain[1])*(vertex[n][1]-domain[1]) + (vertex[n][2]-domain[2])*(vertex[n][2]-domain[2])) > outer) continue;
+							if (sqrt((vertex_[1]-domain[1])*(vertex_[1]-domain[1]) + (vertex_[2]-domain[2])*(vertex_[2]-domain[2])) > outer) continue;
 						}
-						else if (vertex[n][2] > domain[5])
+						else if (vertex_[2] > domain[5])
 						{
-							if (sqrt((vertex[n][1]-domain[1])*(vertex[n][1]-domain[1]) + (vertex[n][2]-domain[5])*(vertex[n][2]-domain[5])) > outer) continue;
+							if (sqrt((vertex_[1]-domain[1])*(vertex_[1]-domain[1]) + (vertex_[2]-domain[5])*(vertex_[2]-domain[5])) > outer) continue;
 						}
-						else if (domain[1]-vertex[n][1] > outer) continue;
+						else if (domain[1]-vertex_[1] > outer) continue;
 					}
-					else if (vertex[n][1] > domain[4])
+					else if (vertex_[1] > domain[4])
 					{
-						if (vertex[n][2] < domain[2])
+						if (vertex_[2] < domain[2])
 						{
-							if (sqrt((vertex[n][1]-domain[4])*(vertex[n][1]-domain[4]) + (vertex[n][2]-domain[2])*(vertex[n][2]-domain[2])) > outer) continue;
+							if (sqrt((vertex_[1]-domain[4])*(vertex_[1]-domain[4]) + (vertex_[2]-domain[2])*(vertex_[2]-domain[2])) > outer) continue;
 						}
-						else if (vertex[n][2] > domain[5])
+						else if (vertex_[2] > domain[5])
 						{
-							if (sqrt((vertex[n][1]-domain[4])*(vertex[n][1]-domain[4]) + (vertex[n][2]-domain[5])*(vertex[n][2]-domain[5])) > outer) continue;
+							if (sqrt((vertex_[1]-domain[4])*(vertex_[1]-domain[4]) + (vertex_[2]-domain[5])*(vertex_[2]-domain[5])) > outer) continue;
 						}
-						else if (vertex[n][1]-domain[4] > outer) continue;
+						else if (vertex_[1]-domain[4] > outer) continue;
 					}
-					else if (vertex[n][2]-domain[5] > outer || domain[2]-vertex[n][2] > outer) continue;
+					else if (vertex_[2]-domain[5] > outer || domain[2]-vertex_[2] > outer) continue;
 				}
 				
-				if (sqrt((corner[0][0]-vertex[n][0])*(corner[0][0]-vertex[n][0]) + (corner[0][1]-vertex[n][1])*(corner[0][1]-vertex[n][1]) + (corner[0][2]-vertex[n][2])*(corner[0][2]-vertex[n][2])) < inner && sqrt((corner[1][0]-vertex[n][0])*(corner[1][0]-vertex[n][0]) + (corner[1][1]-vertex[n][1])*(corner[1][1]-vertex[n][1]) + (corner[1][2]-vertex[n][2])*(corner[1][2]-vertex[n][2])) < inner && sqrt((corner[2][0]-vertex[n][0])*(corner[2][0]-vertex[n][0]) + (corner[2][1]-vertex[n][1])*(corner[2][1]-vertex[n][1]) + (corner[2][2]-vertex[n][2])*(corner[2][2]-vertex[n][2])) < inner && sqrt((corner[3][0]-vertex[n][0])*(corner[3][0]-vertex[n][0]) + (corner[3][1]-vertex[n][1])*(corner[3][1]-vertex[n][1]) + (corner[3][2]-vertex[n][2])*(corner[3][2]-vertex[n][2])) < inner && sqrt((corner[4][0]-vertex[n][0])*(corner[4][0]-vertex[n][0]) + (corner[4][1]-vertex[n][1])*(corner[4][1]-vertex[n][1]) + (corner[4][2]-vertex[n][2])*(corner[4][2]-vertex[n][2])) < inner && sqrt((corner[5][0]-vertex[n][0])*(corner[5][0]-vertex[n][0]) + (corner[5][1]-vertex[n][1])*(corner[5][1]-vertex[n][1]) + (corner[5][2]-vertex[n][2])*(corner[5][2]-vertex[n][2])) < inner && sqrt((corner[6][0]-vertex[n][0])*(corner[6][0]-vertex[n][0]) + (corner[6][1]-vertex[n][1])*(corner[6][1]-vertex[n][1]) + (corner[6][2]-vertex[n][2])*(corner[6][2]-vertex[n][2])) < inner && sqrt((corner[7][0]-vertex[n][0])*(corner[7][0]-vertex[n][0]) + (corner[7][1]-vertex[n][1])*(corner[7][1]-vertex[n][1]) + (corner[7][2]-vertex[n][2])*(corner[7][2]-vertex[n][2])) < inner) continue; // domain lies within inner sphere
+				if (sqrt((corner[0][0]-vertex_[0])*(corner[0][0]-vertex_[0]) + (corner[0][1]-vertex_[1])*(corner[0][1]-vertex_[1]) + (corner[0][2]-vertex_[2])*(corner[0][2]-vertex_[2])) < inner && sqrt((corner[1][0]-vertex_[0])*(corner[1][0]-vertex_[0]) + (corner[1][1]-vertex_[1])*(corner[1][1]-vertex_[1]) + (corner[1][2]-vertex_[2])*(corner[1][2]-vertex_[2])) < inner && sqrt((corner[2][0]-vertex_[0])*(corner[2][0]-vertex_[0]) + (corner[2][1]-vertex_[1])*(corner[2][1]-vertex_[1]) + (corner[2][2]-vertex_[2])*(corner[2][2]-vertex_[2])) < inner && sqrt((corner[3][0]-vertex_[0])*(corner[3][0]-vertex_[0]) + (corner[3][1]-vertex_[1])*(corner[3][1]-vertex_[1]) + (corner[3][2]-vertex_[2])*(corner[3][2]-vertex_[2])) < inner && sqrt((corner[4][0]-vertex_[0])*(corner[4][0]-vertex_[0]) + (corner[4][1]-vertex_[1])*(corner[4][1]-vertex_[1]) + (corner[4][2]-vertex_[2])*(corner[4][2]-vertex_[2])) < inner && sqrt((corner[5][0]-vertex_[0])*(corner[5][0]-vertex_[0]) + (corner[5][1]-vertex_[1])*(corner[5][1]-vertex_[1]) + (corner[5][2]-vertex_[2])*(corner[5][2]-vertex_[2])) < inner && sqrt((corner[6][0]-vertex_[0])*(corner[6][0]-vertex_[0]) + (corner[6][1]-vertex_[1])*(corner[6][1]-vertex_[1]) + (corner[6][2]-vertex_[2])*(corner[6][2]-vertex_[2])) < inner && sqrt((corner[7][0]-vertex_[0])*(corner[7][0]-vertex_[0]) + (corner[7][1]-vertex_[1])*(corner[7][1]-vertex_[1]) + (corner[7][2]-vertex_[2])*(corner[7][2]-vertex_[2])) < inner) continue; // domain lies within inner sphere
 
 				rdom = 0.5 * sqrt((domain[3]-domain[0])*(domain[3]-domain[0]) + (domain[4]-domain[1])*(domain[4]-domain[1]) + (domain[5]-domain[2])*(domain[5]-domain[2]));
-				dist = sqrt((0.5*domain[0]+0.5*domain[3]-vertex[n][0])*(0.5*domain[0]+0.5*domain[3]-vertex[n][0]) + (0.5*domain[1]+0.5*domain[4]-vertex[n][1])*(0.5*domain[1]+0.5*domain[4]-vertex[n][1]) + (0.5*domain[2]+0.5*domain[5]-vertex[n][2])*(0.5*domain[2]+0.5*domain[5]-vertex[n][2]));
+				dist = sqrt((0.5*domain[0]+0.5*domain[3]-vertex_[0])*(0.5*domain[0]+0.5*domain[3]-vertex_[0]) + (0.5*domain[1]+0.5*domain[4]-vertex_[1])*(0.5*domain[1]+0.5*domain[4]-vertex_[1]) + (0.5*domain[2]+0.5*domain[5]-vertex_[2])*(0.5*domain[2]+0.5*domain[5]-vertex_[2]));
 
 				if (dist <= rdom) // vertex lies within domain enclosing sphere
 				{
-					n++;
+					#pragma omp critical(recordvertex)
+					{
+						if (n < MAX_INTERSECTS)
+						{
+							vertex[n][0] = vertex_[0];
+							vertex[n][1] = vertex_[1];
+							vertex[n][2] = vertex_[2];
+						}
+						n++;
+					}
 					continue;
 				}
 
-				if (((0.5*domain[0]+0.5*domain[3]-vertex[n][0])*lightcone.direction[0] + (0.5*domain[1]+0.5*domain[4]-vertex[n][1])*lightcone.direction[1] + (0.5*domain[2]+0.5*domain[5]-vertex[n][2])*lightcone.direction[2]) / dist >= lightcone.opening) // center of domain lies within opening
+				if (((0.5*domain[0]+0.5*domain[3]-vertex_[0])*lightcone.direction[0] + (0.5*domain[1]+0.5*domain[4]-vertex_[1])*lightcone.direction[1] + (0.5*domain[2]+0.5*domain[5]-vertex_[2])*lightcone.direction[2]) / dist >= lightcone.opening) // center of domain lies within opening
 				{
-					n++;
+					#pragma omp critical(recordvertex)
+					{
+						if (n < MAX_INTERSECTS)
+						{
+							vertex[n][0] = vertex_[0];
+							vertex[n][1] = vertex_[1];
+							vertex[n][2] = vertex_[2];
+						}
+						n++;
+					}
 					continue;
 				} 
 
-				if (dist > outer && acos(((0.5*domain[0]+0.5*domain[3]-vertex[n][0])*lightcone.direction[0] + (0.5*domain[1]+0.5*domain[4]-vertex[n][1])*lightcone.direction[1] + (0.5*domain[2]+0.5*domain[5]-vertex[n][2])*lightcone.direction[2]) / dist) - acos(lightcone.opening) <= acos((outer*outer + dist*dist - rdom*rdom) / (2. * outer * dist))) // enclosing sphere within opening
+				if (dist > outer && acos(((0.5*domain[0]+0.5*domain[3]-vertex_[0])*lightcone.direction[0] + (0.5*domain[1]+0.5*domain[4]-vertex_[1])*lightcone.direction[1] + (0.5*domain[2]+0.5*domain[5]-vertex_[2])*lightcone.direction[2]) / dist) - acos(lightcone.opening) <= acos((outer*outer + dist*dist - rdom*rdom) / (2. * outer * dist))) // enclosing sphere within opening
 				{
-					n++;
+					#pragma omp critical(recordvertex)
+					{
+						if (n < MAX_INTERSECTS)
+						{
+							vertex[n][0] = vertex_[0];
+							vertex[n][1] = vertex_[1];
+							vertex[n][2] = vertex_[2];
+						}
+						n++;
+					}
 					continue;
 				}
 				
-				if (dist <= outer && acos(((0.5*domain[0]+0.5*domain[3]-vertex[n][0])*lightcone.direction[0] + (0.5*domain[1]+0.5*domain[4]-vertex[n][1])*lightcone.direction[1] + (0.5*domain[2]+0.5*domain[5]-vertex[n][2])*lightcone.direction[2]) / dist) - acos(lightcone.opening) <= asin(rdom / dist)) // enclosing sphere within opening
+				if (dist <= outer && acos(((0.5*domain[0]+0.5*domain[3]-vertex_[0])*lightcone.direction[0] + (0.5*domain[1]+0.5*domain[4]-vertex_[1])*lightcone.direction[1] + (0.5*domain[2]+0.5*domain[5]-vertex_[2])*lightcone.direction[2]) / dist) - acos(lightcone.opening) <= asin(rdom / dist)) // enclosing sphere within opening
 				{
-					n++;
+					#pragma omp critical(recordvertex)
+					{
+						if (n < MAX_INTERSECTS)
+						{
+							vertex[n][0] = vertex_[0];
+							vertex[n][1] = vertex_[1];
+							vertex[n][2] = vertex_[2];
+						}
+						n++;
+					}
 				}
 			}
 		}
+	}
+
+	if (n >= MAX_INTERSECTS)
+	{
+		cout << COLORTEXT_YELLOW << " /!\\ warning" << COLORTEXT_RESET << ": maximum number of lightcone intersects exceeds MAX_INTERSECTS = " << MAX_INTERSECTS << " for domain (" << domain[0] << ", " << domain[1] << ", " << domain[2] << ") - (" << domain[3] << ", " << domain[4] << ", " << domain[5] << "); some data may be missing in output!" << endl;
+		return MAX_INTERSECTS;
 	}
 
 	return n;
@@ -683,6 +834,20 @@ string hourMinSec(double seconds)
 
 	return output;
 }
+
+__host__ __device__ void lattice_add(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+{
+	(*fields[0])(sites[0]) += (*params);
+}
+
+struct lattice_add_functor
+{
+	__host__ __device__ void operator()(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+	{
+		lattice_add(fields, sites, nfields, params, outputs);
+	}
+};
+
 
 #ifdef HAVE_HEALPIX
 

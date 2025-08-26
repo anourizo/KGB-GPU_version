@@ -280,7 +280,7 @@ double prepareFTsource(Field<Real> & phi, Field<Real> & chi, Field<Real> & sourc
 	int block_x = result.lattice().sizeLocal(1);
 	int block_y = result.lattice().sizeLocal(2);
 
-	lattice_for_each<prepareFTsource_T00_functor, 1><<<dim3(block_x, block_y), 128, 4*sizeof(double)>>>(prepareFTsource_T00_functor(), numpts, fields, 4, d_params, d_sum, d_reduce);
+	lattice_for_each<prepareFTsource_T00_functor, 1><<<dim3(block_x, block_y), 128>>>(prepareFTsource_T00_functor(), numpts, fields, 4, d_params, d_sum, d_reduce);
 
 	cudaDeviceSynchronize();
 

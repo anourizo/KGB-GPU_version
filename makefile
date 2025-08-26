@@ -27,6 +27,7 @@ DGEVOLUTION  += -DCOLORTERMINAL
 DGEVOLUTION  += -DHAVE_CLASS    # requires LIB -lclass
 DGEVOLUTION  += -DHAVE_HEALPIX  # requires LIB -lchealpix
 DGEVOLUTION  += -DGRADIENT_ORDER=2
+#DGEVOLUTION  += -DDEBUG_ALIGNMENT
 
 # further compiler options
 OPT          := -O2 -std=c++17 -g -ccbin mpic++ -arch=sm_90 --extended-lambda -Xcompiler -fopenmp

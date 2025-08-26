@@ -413,10 +413,15 @@ int main(int argc, char **argv)
 	thrust::fill_n(thrust::device, vi.data(), 3*lat.sitesLocalGross(), Real(0));
 #endif
 #ifdef TENSOR_EVOLUTION
-	for (kFT.first(); kFT.test(); kFT.next())
+	/*for (kFT.first(); kFT.test(); kFT.next())
 	{
 		for (int i = 0; i < hijprimeFT.components(); i++)
 			hijprimeFT(kFT, i) = Cplx(0,0);
+	}*/
+	#pragma omp parallel for
+	for (long i = 0; i < hijprimeFT.components() * latFT.sitesLocalGross(); i++)
+	{
+		hijprimeFT.data()[i] = Cplx(0,0);
 	}
 #endif
 	
@@ -451,28 +456,50 @@ int main(int argc, char **argv)
 		{
 			gsl_spline * tk1 = NULL;
 			gsl_spline * tk2 = NULL;
-			gsl_interp_accel * acc = gsl_interp_accel_alloc();
+			gsl_interp_accel * acc;
 			loadTransferFunctions(class_background, class_perturbs, tk1, tk2, NULL, sim.boxsize, (1. / a) - 1., cosmo.h);
-			for (kFT.first(); kFT.test(); kFT.next())
+
+			#pragma omp parallel default(shared) firstprivate(kFT) private(acc, tmp)
 			{
-				tmp = kFT.coord(0)*kFT.coord(0);
-				if (kFT.coord(1) < (sim.numpts/2) + 1)
-					tmp += kFT.coord(1)*kFT.coord(1);
-				else
-					tmp += (sim.numpts-kFT.coord(1))*(sim.numpts-kFT.coord(1));
-				if (kFT.coord(2) < (sim.numpts/2) + 1)
-					tmp += kFT.coord(2)*kFT.coord(2);
-                else
-                	tmp += (sim.numpts-kFT.coord(2))*(sim.numpts-kFT.coord(2));
-				if (tmp > 0)
+				acc = gsl_interp_accel_alloc();
+				#pragma omp for collapse(2)
+				for (int i = 0; i < zetaFT->lattice().sizeLocal(1); i++)
 				{
-					tmp = 2. * M_PI * sqrt(tmp);
-					(*zetaFT)(kFT) /= -gsl_spline_eval(tk1, tmp, acc) * numpts3d * M_PI * sqrt(Pk_primordial(tmp * cosmo.h / sim.boxsize, ic) / tmp) / tmp;
+					for (int j = 0; j < zetaFT->lattice().sizeLocal(2); j++)
+					{
+						if (!kFT.setCoord(0, j + zetaFT->lattice().coordSkip()[0], i + zetaFT->lattice().coordSkip()[1]))
+						{
+							std::cerr << "proc#" << parallel.rank() << ": Error in setting um zeta! Could not set coordinates at k=(0, " << j + zetaFT->lattice().coordSkip()[0] << ", " << i + zetaFT->lattice().coordSkip()[1] << ")" << std::endl;
+						}
+
+						if (kFT.coord(1) < (sim.numpts/2) + 1)
+							tmp = kFT.coord(1)*kFT.coord(1);
+						else
+							tmp = (sim.numpts-kFT.coord(1))*(sim.numpts-kFT.coord(1));
+						if (kFT.coord(2) < (sim.numpts/2) + 1)
+							tmp += kFT.coord(2)*kFT.coord(2);
+						else
+							tmp += (sim.numpts-kFT.coord(2))*(sim.numpts-kFT.coord(2));
+
+						for (int z = 0; z < zetaFT->lattice().sizeLocal(0); z++)
+						{
+							double k2 = z*z + tmp;
+
+							if (k2 > 0)
+							{
+								k2 = 2. * M_PI * sqrt(k2);
+								(*zetaFT)(kFT) /= -gsl_spline_eval(tk1, k2, acc) * numpts3d * M_PI * sqrt(Pk_primordial(k2 * cosmo.h / sim.boxsize, ic) / k2) / k2;
+							}
+							else
+								(*zetaFT)(kFT) = Cplx(0.,0.);
+
+							kFT.next();
+						}
+					}
 				}
-				else
-					(*zetaFT)(kFT) = Cplx(0.,0.);
+				gsl_interp_accel_free(acc);
 			}
-			gsl_interp_accel_free(acc);
+			
 			gsl_spline_free(tk1);
 			gsl_spline_free(tk2);
 		}
@@ -480,8 +507,9 @@ int main(int argc, char **argv)
 		{
 			prepareFTchiLinear(class_background, class_perturbs, scalarFT, sim, ic, cosmo, fourpiG, a, 1., zetaFT);
 			plan_source.execute(FFT_BACKWARD);
-			for (x.first(); x.test(); x.next())
-				chi(x) += source(x);
+			//for (x.first(); x.test(); x.next())
+			//	chi(x) += source(x);
+			thrust::transform(thrust::device, chi.data(), chi.data() + lat.sitesLocalGross(), source.data(), chi.data(), thrust::plus<Real>());
 			chi.updateHalo();
 		}
 	}
@@ -527,16 +555,29 @@ int main(int argc, char **argv)
 			projection_T00_project(&pcls_cdm, &source, a, &phi);
 			if (sim.baryon_flag)
 				projection_T00_project(&pcls_b, &source, a, &phi);
+			
+			tmp = 0;
 			for (int i = 0; i < cosmo.num_ncdm; i++)
 			{
 				if (a >= 1. / (sim.z_switch_deltancdm[i] + 1.) && sim.numpcl[1+sim.baryon_flag+i] > 0)
 					projection_T00_project(pcls_ncdm+i, &source, a, &phi);
 				else if (sim.radiation_flag == 0 || (a >= 1. / (sim.z_switch_deltancdm[i] + 1.) && sim.numpcl[1+sim.baryon_flag+i] == 0))
 				{
-					tmp = bg_ncdm(a, cosmo, i);
-					for(x.first(); x.test(); x.next())
-						source(x) += tmp;
+					//tmp = bg_ncdm(a, cosmo, i);
+					//for(x.first(); x.test(); x.next())
+					//	source(x) += tmp;
+
+					tmp += bg_ncdm(a, cosmo, i);
 				}
+			}
+
+			if (tmp > 0)
+			{
+				Field<Real> * fieldptr = &source;
+
+				lattice_for_each<<<dim3(source.lattice().sizeLocal(1), source.lattice().sizeLocal(2)), 128>>>(lattice_add_functor(), sim.numpts, &fieldptr, 1, &tmp, nullptr, nullptr);
+
+				cudaDeviceSynchronize();
 			}
 		}
 		else

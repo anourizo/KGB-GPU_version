@@ -73,7 +73,6 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 {
 	char filename[2*PARAM_MAX_LENGTH+64];
 	char buffer[64];
-	int i;
 	gadget2_header hdr;
 	Site x(phi->lattice());
 	Real divB, curlB, divh, traceh, normh;
@@ -89,7 +88,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		/*pcls_cdm->saveHDF5_server_open(h5filename + filename + "_cdm");
 		if (sim.baryon_flag)
 			pcls_b->saveHDF5_server_open(h5filename + filename + "_b");*/
-		for (i = 0; i < cosmo.num_ncdm; i++)
+		for (int i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 			sprintf(buffer, "_ncdm%d", i);
@@ -129,7 +128,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		scalarProjectionCIC_project(pcls_cdm, source);
 		if (sim.baryon_flag)
 			scalarProjectionCIC_project(pcls_b, source);
-		for (i = 0; i < cosmo.num_ncdm; i++)
+		for (int i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 			scalarProjectionCIC_project(pcls_ncdm+i, source);
@@ -165,7 +164,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 			projection_T00_project(pcls_cdm, source, a, phi);
 			if (sim.baryon_flag)
 				projection_T00_project(pcls_b, source, a, phi);
-			for (i = 0; i < cosmo.num_ncdm; i++)
+			for (int i = 0; i < cosmo.num_ncdm; i++)
 			{
 				if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 				projection_T00_project(pcls_ncdm+i, source, a, phi);
@@ -176,7 +175,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 			scalarProjectionCIC_project(pcls_cdm, source);
 			if (sim.baryon_flag)
 				scalarProjectionCIC_project(pcls_b, source);
-			for (i = 0; i < cosmo.num_ncdm; i++)
+			for (int i = 0; i < cosmo.num_ncdm; i++)
 			{
 				if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 				scalarProjectionCIC_project(pcls_ncdm+i, source);
@@ -217,12 +216,17 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		{
 			plan_Bi->execute(FFT_BACKWARD);
 		}
-		for (x.first(); x.test(); x.next())
-		{
-			(*Bi)(x,0) /= a * a * sim.numpts;
-			(*Bi)(x,1) /= a * a * sim.numpts;
-			(*Bi)(x,2) /= a * a * sim.numpts;
-		}
+
+		double params = 1. / (a * a * sim.numpts);
+		double * d_params;
+		cudaMalloc((void **) &d_params, sizeof(double));
+		cudaMemcpy(d_params, &params, sizeof(double), cudaMemcpyDefault);
+
+		lattice_for_each<<<dim3(Bi->lattice().sizeLocal(1), Bi->lattice().sizeLocal(2)), 128>>>(lattice_multiply_functor<3>(), sim.numpts, &Bi, 1, d_params, nullptr, nullptr);
+
+		cudaDeviceSynchronize();
+		cudaFree(d_params);
+
 		Bi->updateHalo();
 				
 		computeVectorDiagnostics(*Bi, divB, curlB);			
@@ -304,7 +308,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		projection_Tij_project(pcls_cdm, Sij, a, phi);
 		if (sim.baryon_flag)
 			projection_Tij_project(pcls_b, Sij, a, phi);
-		for (i = 0; i < cosmo.num_ncdm; i++)
+		for (int i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 			projection_Tij_project(pcls_ncdm+i, Sij, a, phi);
@@ -325,7 +329,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		projection_T0i_project(pcls_cdm, Bi, phi);
 		if (sim.baryon_flag)
 			projection_T0i_project(pcls_b, Bi, phi);
-		for (i = 0; i < cosmo.num_ncdm; i++)
+		for (int i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 			projection_T0i_project(pcls_ncdm+i, Bi, phi);
@@ -353,7 +357,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 			projection_T0i_project(pcls_cdm, Bi_check, phi);
 			if (sim.baryon_flag)
 				projection_T0i_project(pcls_b, Bi_check, phi);
-			for (i = 0; i < cosmo.num_ncdm; i++)
+			for (int i = 0; i < cosmo.num_ncdm; i++)
 			{
 				if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 				projection_T0i_project(pcls_ncdm+i, Bi_check, phi);
@@ -363,13 +367,17 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 			projectFTvector(*BiFT_check, *BiFT_check, fourpiG / (double) sim.numpts / (double) sim.numpts);
 		}
 		plan_Bi_check->execute(FFT_BACKWARD);
+
+		double params = 1. / (a * a * sim.numpts);
+		double * d_params;
+		cudaMalloc((void **) &d_params, sizeof(double));
+		cudaMemcpy(d_params, &params, sizeof(double), cudaMemcpyDefault);
+
+		lattice_for_each<<<dim3(Bi_check->lattice().sizeLocal(1), Bi_check->lattice().sizeLocal(2)), 128>>>(lattice_multiply_functor<3>(), sim.numpts, &Bi_check, 1, d_params, nullptr, nullptr);
+
+		cudaDeviceSynchronize();
+		cudaFree(d_params);
 			
-		for (x.first(); x.test(); x.next())
-		{
-			(*Bi_check)(x,0) /= a * a * sim.numpts;
-			(*Bi_check)(x,1) /= a * a * sim.numpts;
-			(*Bi_check)(x,2) /= a * a * sim.numpts;
-		}
 #ifdef EXTERNAL_IO
 		Bi_check->saveHDF5_server_write(NUMBER_OF_IO_FILES);
 #else
@@ -398,9 +406,9 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		hdr.flag_feedback = 0;
 		hdr.flag_age = 0;
 		hdr.flag_metals = 0;
-		for (i = 0; i < 256 - 6 * 4 - 6 * 8 - 2 * 8 - 2 * 4 - 6 * 4 - 2 * 4 - 4 * 8 - 2 * 4 - 6 * 4; i++)
+		for (int i = 0; i < 256 - 6 * 4 - 6 * 8 - 2 * 8 - 2 * 4 - 6 * 4 - 2 * 4 - 4 * 8 - 2 * 4 - 6 * 4; i++)
 			hdr.fill[i] = 0;
-		for (i = 0; i < 6; i++)
+		for (int i = 0; i < 6; i++)
 		{
 			hdr.npart[i] = 0;
 			hdr.npartTotal[i] = 0;
@@ -449,7 +457,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 				pcls_b->saveGadget2(h5filename + filename + "_b", hdr, sim.tracer_factor[1], dtau_pos, dtau_pos + 0.5 * dtau_old, phi);
 		}
 		
-		for (i = 0; i < cosmo.num_ncdm; i++)
+		for (int i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.out_snapshot & MASK_MULTI)
 				hdr.num_files = parallel.grid_size()[1];
@@ -477,7 +485,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		/*pcls_cdm->saveHDF5_server_write();
 		if (sim.baryon_flag)
 			pcls_b->saveHDF5_server_write();*/
-		for (i = 0; i < cosmo.num_ncdm; i++)
+		for (int i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 			pcls_ncdm[i].saveHDF5_server_write();
@@ -486,7 +494,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		/*pcls_cdm->saveHDF5(h5filename + filename + "_cdm", 1);
 		if (sim.baryon_flag)
 			pcls_b->saveHDF5(h5filename + filename + "_b", 1);*/
-		for (i = 0; i < cosmo.num_ncdm; i++)
+		for (int i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 			sprintf(buffer, "_ncdm%d", i);
@@ -2783,7 +2791,6 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 {
 	char filename[2*PARAM_MAX_LENGTH+64];
 	char buffer[64];
-	int i, j;
 	Site x(phi->lattice());
 	rKSite kFT(scalarFT->lattice());
 	long numpts3d = (long) sim.numpts * (long) sim.numpts * (long) sim.numpts;
@@ -2812,7 +2819,7 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 			if (sim.out_pk & MASK_DELTA)
 			{
 				Omega_ncdm = 0;
-				for (i = 0; i < cosmo.num_ncdm; i++)
+				for (int i = 0; i < cosmo.num_ncdm; i++)
 				{
 					if (a < 1. / (sim.z_switch_deltancdm[i] + 1.) && cosmo.Omega_ncdm[i] > 0)
 						Omega_ncdm += bg_ncdm(a, cosmo, i);
@@ -2827,7 +2834,7 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 		scalarProjectionCIC_project(pcls_cdm, source);
 		if (sim.baryon_flag)
 			scalarProjectionCIC_project(pcls_b, source);
-		for (i = 0; i < cosmo.num_ncdm; i++)
+		for (int i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 			scalarProjectionCIC_project(pcls_ncdm+i, source);
@@ -2884,8 +2891,25 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 				// store k-space information for cross-spectra using SijFT as temporary array
 				if (sim.out_pk & MASK_XSPEC)
 				{
-					for (kFT.first(); kFT.test(); kFT.next())
-						(*SijFT)(kFT, 0) = (*scalarFT)(kFT);
+#pragma omp parallel for collapse(2) default(shared) firstprivate(kFT)
+					for (int i = 0; i < scalarFT->lattice().sizeLocal(1); i++)
+					{
+						for (int j = 0; j < scalarFT->lattice().sizeLocal(2); j++)
+						{
+							if (!kFT.setCoord(0, j + scalarFT->lattice().coordSkip()[0], i + scalarFT->lattice().coordSkip()[1]))
+							{
+								std::cerr << "proc#" << parallel.rank() << ": Error in writeSpectra! Could not set coordinates at k=(0, " << j + scalarFT->lattice().coordSkip()[0] << ", " << i + scalarFT->lattice().coordSkip()[1] << ")" << std::endl;
+								throw std::runtime_error("Error in writeSpectra: Could not set coordinates.");
+							}
+
+							for (int z = 0; z < scalarFT->lattice().sizeLocal(0); z++)
+							{
+								(*SijFT)(kFT, 0) = (*scalarFT)(kFT);
+
+								kFT.next();
+							}
+						}
+					}
 				}
 				projection_init(source);
 				scalarProjectionCIC_project(pcls_b, source);
@@ -2902,7 +2926,7 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 				}
 			}
 			Omega_ncdm = 0.;
-			for (i = 0; i < cosmo.num_ncdm; i++)
+			for (int i = 0; i < cosmo.num_ncdm; i++)
 			{
 				projection_init(source);
 				if (sim.numpcl[1+sim.baryon_flag+i] > 0)
@@ -2917,26 +2941,59 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 				// store k-space information for cross-spectra using SijFT as temporary array
 				if (cosmo.num_ncdm > 1 && i < 6)
 				{
-					for (kFT.first(); kFT.test(); kFT.next())
-						(*SijFT)(kFT, i) = (*scalarFT)(kFT);
+#pragma omp parallel for collapse(2) default(shared) firstprivate(kFT)
+					for (int ii = 0; ii < scalarFT->lattice().sizeLocal(1); ii++)
+					{
+						for (int j = 0; j < scalarFT->lattice().sizeLocal(2); j++)
+						{
+							if (!kFT.setCoord(0, j + scalarFT->lattice().coordSkip()[0], ii + scalarFT->lattice().coordSkip()[1]))
+							{
+								std::cerr << "proc#" << parallel.rank() << ": Error in writeSpectra! Could not set coordinates at k=(0, " << j + scalarFT->lattice().coordSkip()[0] << ", " << ii + scalarFT->lattice().coordSkip()[1] << ")" << std::endl;
+								throw std::runtime_error("Error in writeSpectra: Could not set coordinates.");
+							}
+
+							for (int z = 0; z < scalarFT->lattice().sizeLocal(0); z++)
+							{
+								(*SijFT)(kFT, i) = (*scalarFT)(kFT);
+
+								kFT.next();
+							}
+						}
+					}
 				}						
 			}
 			if (cosmo.num_ncdm > 1 && cosmo.num_ncdm <= 7)
 			{
-				for (kFT.first(); kFT.test(); kFT.next())
+#pragma omp parallel for collapse(2) default(shared) firstprivate(kFT)
+				for (int ii = 0; ii < scalarFT->lattice().sizeLocal(1); ii++)
 				{
-					for (i = 0; i < cosmo.num_ncdm-1; i++)
-						(*scalarFT)(kFT) += (*SijFT)(kFT, i);
+					for (int j = 0; j < scalarFT->lattice().sizeLocal(2); j++)
+					{
+						if (!kFT.setCoord(0, j + scalarFT->lattice().coordSkip()[0], ii + scalarFT->lattice().coordSkip()[1]))
+						{
+							std::cerr << "proc#" << parallel.rank() << ": Error in writeSpectra! Could not set coordinates at k=(0, " << j + scalarFT->lattice().coordSkip()[0] << ", " << ii + scalarFT->lattice().coordSkip()[1] << ")" << std::endl;
+							throw std::runtime_error("Error in writeSpectra: Could not set coordinates.");
+						}
+
+						for (int z = 0; z < scalarFT->lattice().sizeLocal(0); z++)
+						{
+							for (int i = 0; i < cosmo.num_ncdm-1; i++)
+								(*scalarFT)(kFT) += (*SijFT)(kFT, i);
+
+							kFT.next();
+						}
+					}
 				}
+				
 				extractPowerSpectrum(*scalarFT, kbin, power, kscatter, pscatter, occupation, sim.numbins, true, KTYPE_LINEAR);
 				sprintf(filename, "%s%s%03d_ncdm.dat", sim.output_path, sim.basename_pk, pkcount);
 				writePowerSpectrum(kbin, power, kscatter, pscatter, occupation, sim.numbins, sim.boxsize, (Real) numpts3d * (Real) numpts3d * 2. * M_PI * M_PI * Omega_ncdm * Omega_ncdm, filename, "power spectrum of delta_N for total ncdm", a, sim.z_pk[pkcount]);
 			}
 			if (cosmo.num_ncdm > 1)
 			{
-				for (i = 0; i < cosmo.num_ncdm-1 && i < 5; i++)
+				for (int i = 0; i < cosmo.num_ncdm-1 && i < 5; i++)
 				{
-					for (j = i+1; j < cosmo.num_ncdm && j < 6; j++)
+					for (int j = i+1; j < cosmo.num_ncdm && j < 6; j++)
 					{
 						if (sim.out_pk & MASK_XSPEC || (i == 0 && j == 1) || (i == 2 && j == 3) || (i == 4 && j == 5))
 						{
@@ -2973,7 +3030,7 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 		projection_Tij_project(pcls_cdm, Sij, a, phi);
 		if (sim.baryon_flag)
 			projection_Tij_project(pcls_b, Sij, a, phi);
-		for (i = 0; i < cosmo.num_ncdm; i++)
+		for (int i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 			projection_Tij_project(pcls_ncdm+i, Sij, a, phi);
@@ -3009,7 +3066,7 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 			if (sim.out_pk & MASK_DELTA)
 			{
 				Omega_ncdm = 0;
-				for (i = 0; i < cosmo.num_ncdm; i++)
+				for (int i = 0; i < cosmo.num_ncdm; i++)
 				{
 					if (a < 1. / (sim.z_switch_deltancdm[i] + 1.) && cosmo.Omega_ncdm[i] > 0)
 						Omega_ncdm += bg_ncdm(a, cosmo, i);
@@ -3024,7 +3081,7 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 		projection_T00_project(pcls_cdm, source, a, phi);
 		if (sim.baryon_flag)
 			projection_T00_project(pcls_b, source, a, phi);
-		for (i = 0; i < cosmo.num_ncdm; i++)
+		for (int i = 0; i < cosmo.num_ncdm; i++)
 		{
 			if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 			projection_T00_project(pcls_ncdm+i, source, a, phi);
@@ -3068,8 +3125,25 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 				// store k-space information for cross-spectra using SijFT as temporary array
 				if (sim.out_pk & MASK_XSPEC)
 				{
-					for (kFT.first(); kFT.test(); kFT.next())
-						(*SijFT)(kFT, 0) = (*scalarFT)(kFT);
+#pragma omp parallel for collapse(2) default(shared) firstprivate(kFT)
+					for (int i = 0; i < scalarFT->lattice().sizeLocal(1); i++)
+					{
+						for (int j = 0; j < scalarFT->lattice().sizeLocal(2); j++)
+						{
+							if (!kFT.setCoord(0, j + scalarFT->lattice().coordSkip()[0], i + scalarFT->lattice().coordSkip()[1]))
+							{
+								std::cerr << "proc#" << parallel.rank() << ": Error in writeSpectra! Could not set coordinates at k=(0, " << j + scalarFT->lattice().coordSkip()[0] << ", " << i + scalarFT->lattice().coordSkip()[1] << ")" << std::endl;
+								throw std::runtime_error("Error in writeSpectra: Could not set coordinates.");
+							}
+
+							for (int z = 0; z < scalarFT->lattice().sizeLocal(0); z++)
+							{
+								(*SijFT)(kFT, 0) = (*scalarFT)(kFT);
+
+								kFT.next();
+							}
+						}
+					}
 				}
 				projection_init(source);
 				projection_T00_project(pcls_b, source, a, phi);
@@ -3093,7 +3167,7 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 					writePowerSpectrum(kbin, power, kscatter, pscatter, occupation, sim.numbins, sim.boxsize, (Real) numpts3d * (Real) numpts3d * 2. * M_PI * M_PI * cosmo.Omega_b * cosmo.Omega_cdm, filename, "cross power spectrum of delta for cdm x baryons", a, sim.z_pk[pkcount]);
 				}
 			}
-			for (i = 0; i < cosmo.num_ncdm; i++)
+			for (int i = 0; i < cosmo.num_ncdm; i++)
 			{
 				projection_init(source);
 				if (sim.numpcl[1+sim.baryon_flag+i] > 0)
@@ -3116,17 +3190,50 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 				// store k-space information for cross-spectra using SijFT as temporary array
 				if (cosmo.num_ncdm > 1 && i < 6)
 				{
-					for (kFT.first(); kFT.test(); kFT.next())
-						(*SijFT)(kFT, i) = (*scalarFT)(kFT);
+#pragma omp parallel for collapse(2) default(shared) firstprivate(kFT)
+					for (int ii = 0; ii < scalarFT->lattice().sizeLocal(1); ii++)
+					{
+						for (int j = 0; j < scalarFT->lattice().sizeLocal(2); j++)
+						{
+							if (!kFT.setCoord(0, j + scalarFT->lattice().coordSkip()[0], ii + scalarFT->lattice().coordSkip()[1]))
+							{
+								std::cerr << "proc#" << parallel.rank() << ": Error in writeSpectra! Could not set coordinates at k=(0, " << j + scalarFT->lattice().coordSkip()[0] << ", " << ii + scalarFT->lattice().coordSkip()[1] << ")" << std::endl;
+								throw std::runtime_error("Error in writeSpectra: Could not set coordinates.");
+							}
+
+							for (int z = 0; z < scalarFT->lattice().sizeLocal(0); z++)
+							{
+								(*SijFT)(kFT, i) = (*scalarFT)(kFT);
+
+								kFT.next();
+							}
+						}
+					}
 				}
 			}
 			if (cosmo.num_ncdm > 1 && cosmo.num_ncdm <= 7)
 			{
-				for (kFT.first(); kFT.test(); kFT.next())
+#pragma omp parallel for collapse(2) default(shared) firstprivate(kFT)
+				for (int ii = 0; ii < scalarFT->lattice().sizeLocal(1); ii++)
 				{
-					for (i = 0; i < cosmo.num_ncdm-1; i++)
-						(*scalarFT)(kFT) += (*SijFT)(kFT, i);
+					for (int j = 0; j < scalarFT->lattice().sizeLocal(2); j++)
+					{
+						if (!kFT.setCoord(0, j + scalarFT->lattice().coordSkip()[0], ii + scalarFT->lattice().coordSkip()[1]))
+						{
+							std::cerr << "proc#" << parallel.rank() << ": Error in writeSpectra! Could not set coordinates at k=(0, " << j + scalarFT->lattice().coordSkip()[0] << ", " << ii + scalarFT->lattice().coordSkip()[1] << ")" << std::endl;
+							throw std::runtime_error("Error in writeSpectra: Could not set coordinates.");
+						}
+
+						for (int z = 0; z < scalarFT->lattice().sizeLocal(0); z++)
+						{
+							for (int i = 0; i < cosmo.num_ncdm-1; i++)
+								(*scalarFT)(kFT) += (*SijFT)(kFT, i);
+
+							kFT.next();
+						}
+					}
 				}
+				
 				extractPowerSpectrum(*scalarFT, kbin, power, kscatter, pscatter, occupation, sim.numbins, true, KTYPE_LINEAR);
 				if (sim.out_pk & MASK_T00)
 				{
@@ -3141,9 +3248,9 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 			}
 			if (cosmo.num_ncdm > 1)
 			{
-				for (i = 0; i < cosmo.num_ncdm-1 && i < 5; i++)
+				for (int i = 0; i < cosmo.num_ncdm-1 && i < 5; i++)
 				{
-					for (j = i+1; j < cosmo.num_ncdm && j < 6; j++)
+					for (int j = i+1; j < cosmo.num_ncdm && j < 6; j++)
 					{
 						if (sim.out_pk & MASK_XSPEC || (i == 0 && j == 1) || (i == 2 && j == 3) || (i == 4 && j == 5))
 						{
@@ -3180,7 +3287,7 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 			projection_T0i_project(pcls_cdm, Bi_check, phi);
 			if (sim.baryon_flag)
 				projection_T0i_project(pcls_b, Bi_check, phi);
-			for (i = 0; i < cosmo.num_ncdm; i++)
+			for (int i = 0; i < cosmo.num_ncdm; i++)
 			{
 				if (sim.numpcl[1+sim.baryon_flag+i] == 0) continue;
 				projection_T0i_project(pcls_ncdm+i, Bi_check, phi);

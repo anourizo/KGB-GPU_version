@@ -835,19 +835,6 @@ string hourMinSec(double seconds)
 	return output;
 }
 
-__host__ __device__ void lattice_add(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
-{
-	(*fields[0])(sites[0]) += (*params);
-}
-
-struct lattice_add_functor
-{
-	__host__ __device__ void operator()(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
-	{
-		lattice_add(fields, sites, nfields, params, outputs);
-	}
-};
-
 
 #ifdef HAVE_HEALPIX
 

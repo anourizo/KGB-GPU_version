@@ -17,6 +17,7 @@
 #include <gsl/gsl_spline.h>
 #include "parser.hpp"
 #include "tools.hpp"
+#include <thrust/device_vector.h>
 #include <nvtx3/nvToolsExt.h>
 
 #ifndef Cplx
@@ -805,20 +806,17 @@ void generateCICKernel(Field<Real> & ker, const long numpcl = 0, float * pcldata
 {
 	const long linesize = ker.lattice().sizeLocal(0);
 	Real renorm = linesize * linesize;
-	long i, oct, sx, sy, sz;
+	long sx, sy, sz;
 	float wx, wy, wz, q1, ww;
 	Site x(ker.lattice());
-	
-	for (x.first(); x.test(); x.next())
-	{
-		ker(x) = 0.;
-	}
+
+	thrust::fill_n(thrust::device, ker.data(), ker.lattice().sitesLocalGross(), Real(0));
 	
 	if (numpcl == 0 || pcldata == NULL) // standard kernel
 	{
 		if (x.setCoord(0, 0, 0))
 		{
-			ker(x) = 6. * renorm;
+			ker(x) = Real(6) * renorm;
 			ker(x+0) = -renorm;
 			x.setCoord(linesize-1, 0, 0);
 			ker(x) = -renorm;
@@ -843,9 +841,9 @@ void generateCICKernel(Field<Real> & ker, const long numpcl = 0, float * pcldata
 	
 	renorm /= (Real) (numpcl * (long) numtile * (long) numtile * (long) numtile) / (Real) (linesize * linesize * linesize);
 	
-	for (i = 0; i < numpcl; i++)
+	for (long i = 0; i < numpcl; i++)
 	{
-		for (oct = 0; oct < 8; oct++)
+		for (int oct = 0; oct < 8; oct++)
 		{
 			if (oct == 0)
 			{
@@ -853,9 +851,9 @@ void generateCICKernel(Field<Real> & ker, const long numpcl = 0, float * pcldata
 					continue;
 				
 				// particle is in the first octant   
-				wx = 1. - linesize * pcldata[3*i] / numtile;
-				wy = 1. - linesize * pcldata[3*i+1] / numtile;
-				wz = 1. - linesize * pcldata[3*i+2] / numtile;
+				wx = 1.f - linesize * pcldata[3*i] / numtile;
+				wy = 1.f - linesize * pcldata[3*i+1] / numtile;
+				wz = 1.f - linesize * pcldata[3*i+2] / numtile;
 				
 				sx = 1;
 				sy = 1;
@@ -863,13 +861,13 @@ void generateCICKernel(Field<Real> & ker, const long numpcl = 0, float * pcldata
 			}
 			else if (oct == 1)
 			{
-				if (linesize * (1.-pcldata[3*i]) / numtile >= 1. || linesize * pcldata[3*i+1] / numtile >= 1. || linesize * pcldata[3*i+2] / numtile >= 1.)
+				if (linesize * (1.f-pcldata[3*i]) / numtile >= 1.f || linesize * pcldata[3*i+1] / numtile >= 1.f || linesize * pcldata[3*i+2] / numtile >= 1.f)
 					continue;
 					
 				// particle is in the second octant   
-				wx = 1. - linesize * (1.-pcldata[3*i]) / numtile;
-				wy = 1. - linesize * pcldata[3*i+1] / numtile;
-				wz = 1. - linesize * pcldata[3*i+2] / numtile;
+				wx = 1.f - linesize * (1.f-pcldata[3*i]) / numtile;
+				wy = 1.f - linesize * pcldata[3*i+1] / numtile;
+				wz = 1.f - linesize * pcldata[3*i+2] / numtile;
 				
 				sx = -1;
 				sy = 1;
@@ -877,84 +875,84 @@ void generateCICKernel(Field<Real> & ker, const long numpcl = 0, float * pcldata
 			}
 			else if (oct == 2)
 			{
-				if (linesize * (1.-pcldata[3*i]) / numtile >= 1. || linesize * (1.-pcldata[3*i+1]) / numtile >= 1. || linesize * pcldata[3*i+2] / numtile >= 1.)
+				if (linesize * (1.f-pcldata[3*i]) / numtile >= 1.f || linesize * (1.f-pcldata[3*i+1]) / numtile >= 1.f || linesize * pcldata[3*i+2] / numtile >= 1.f)
 					continue;
 					
 				// particle is in the third octant   
-				wx = 1. - linesize * (1.-pcldata[3*i]) / numtile;
-				wy = 1. - linesize * (1.-pcldata[3*i+1]) / numtile;
-				wz = 1. - linesize * pcldata[3*i+2] / numtile;
-				
+				wx = 1.f - linesize * (1.f-pcldata[3*i]) / numtile;
+				wy = 1.f - linesize * (1.f-pcldata[3*i+1]) / numtile;
+				wz = 1.f - linesize * pcldata[3*i+2] / numtile;
+
 				sx = -1;
 				sy = -1;
 				sz = 1;
 			}
 			else if (oct == 3)
 			{
-				if (linesize * pcldata[3*i] / numtile >= 1. || linesize * (1.-pcldata[3*i+1]) / numtile >= 1. || linesize * pcldata[3*i+2] / numtile >= 1.)
+				if (linesize * pcldata[3*i] / numtile >= 1.f || linesize * (1.f-pcldata[3*i+1]) / numtile >= 1.f || linesize * pcldata[3*i+2] / numtile >= 1.f)
 					continue;
 					
 				// particle is in the fourth octant   
-				wx = 1. - linesize * pcldata[3*i] / numtile;
-				wy = 1. - linesize * (1.-pcldata[3*i+1]) / numtile;
-				wz = 1. - linesize * pcldata[3*i+2] / numtile;
-				
+				wx = 1.f - linesize * pcldata[3*i] / numtile;
+				wy = 1.f - linesize * (1.f-pcldata[3*i+1]) / numtile;
+				wz = 1.f - linesize * pcldata[3*i+2] / numtile;
+
 				sx = 1;
 				sy = -1;
 				sz = 1;
 			}
 			else if (oct == 4)
 			{
-				if (linesize * pcldata[3*i] / numtile >= 1. || linesize * pcldata[3*i+1] / numtile >= 1. || linesize * (1.-pcldata[3*i+2]) / numtile >= 1.)
+				if (linesize * pcldata[3*i] / numtile >= 1.f || linesize * pcldata[3*i+1] / numtile >= 1.f || linesize * (1.f-pcldata[3*i+2]) / numtile >= 1.f)
 					continue;
-				
-				// particle is in the fifth octant   
-				wx = 1. - linesize * pcldata[3*i] / numtile;
-				wy = 1. - linesize * pcldata[3*i+1] / numtile;
-				wz = 1. - linesize * (1.-pcldata[3*i+2]) / numtile;
-				
+
+				// particle is in the fifth octant
+				wx = 1.f - linesize * pcldata[3*i] / numtile;
+				wy = 1.f - linesize * pcldata[3*i+1] / numtile;
+				wz = 1.f - linesize * (1.f-pcldata[3*i+2]) / numtile;
+
 				sx = 1;
 				sy = 1;
 				sz = -1;
 			}
 			else if (oct == 5)
 			{
-				if (linesize * (1.-pcldata[3*i]) / numtile >= 1. || linesize * pcldata[3*i+1] / numtile >= 1. || linesize * (1.-pcldata[3*i+2]) / numtile >= 1.)
+				if (linesize * (1.f-pcldata[3*i]) / numtile >= 1.f || linesize * pcldata[3*i+1] / numtile >= 1.f || linesize * (1.f-pcldata[3*i+2]) / numtile >= 1.f)
 					continue;
-					
-				// particle is in the sixth octant   
-				wx = 1. - linesize * (1.-pcldata[3*i]) / numtile;
-				wy = 1. - linesize * pcldata[3*i+1] / numtile;
-				wz = 1. - linesize * (1.-pcldata[3*i+2]) / numtile;
-				
+
+				// particle is in the sixth octant
+				wx = 1.f - linesize * (1.f-pcldata[3*i]) / numtile;
+				wy = 1.f - linesize * pcldata[3*i+1] / numtile;
+				wz = 1.f - linesize * (1.f-pcldata[3*i+2]) / numtile;
+
 				sx = -1;
 				sy = 1;
 				sz = -1;
 			}
 			else if (oct == 6)
 			{
-				if (linesize * (1.-pcldata[3*i]) / numtile >= 1. || linesize * (1.-pcldata[3*i+1]) / numtile >= 1. || linesize * (1.-pcldata[3*i+2]) / numtile >= 1.)
+				if (linesize * (1.f-pcldata[3*i]) / numtile >= 1.f || linesize * (1.f-pcldata[3*i+1]) / numtile >= 1.f || linesize * (1.f-pcldata[3*i+2]) / numtile >= 1.f)
 					continue;
-					
-				// particle is in the seventh octant   
-				wx = 1. - linesize * (1.-pcldata[3*i]) / numtile;
-				wy = 1. - linesize * (1.-pcldata[3*i+1]) / numtile;
-				wz = 1. - linesize * (1.-pcldata[3*i+2]) / numtile;
-				
+
+				// particle is in the seventh octant
+				wx = 1.f - linesize * (1.f-pcldata[3*i]) / numtile;
+				wy = 1.f - linesize * (1.f-pcldata[3*i+1]) / numtile;
+				wz = 1.f - linesize * (1.f-pcldata[3*i+2]) / numtile;
+
 				sx = -1;
 				sy = -1;
 				sz = -1;
 			}
 			else if (oct == 7)
 			{
-				if (linesize * pcldata[3*i] / numtile >= 1. || linesize * (1.-pcldata[3*i+1]) / numtile >= 1. || linesize * (1.-pcldata[3*i+2]) / numtile >= 1.)
+				if (linesize * pcldata[3*i] / numtile >= 1.f || linesize * (1.f-pcldata[3*i+1]) / numtile >= 1.f || linesize * (1.f-pcldata[3*i+2]) / numtile >= 1.f)
 					continue;
-					
-				// particle is in the eight-th octant   
-				wx = 1. - linesize * pcldata[3*i] / numtile;
-				wy = 1. - linesize * (1.-pcldata[3*i+1]) / numtile;
-				wz = 1. - linesize * (1.-pcldata[3*i+2]) / numtile;
-				
+
+				// particle is in the eight-th octant
+				wx = 1.f - linesize * pcldata[3*i] / numtile;
+				wy = 1.f - linesize * (1.f-pcldata[3*i+1]) / numtile;
+				wz = 1.f - linesize * (1.f-pcldata[3*i+2]) / numtile;
+
 				sx = 1;
 				sy = -1;
 				sz = -1;
@@ -965,14 +963,14 @@ void generateCICKernel(Field<Real> & ker, const long numpcl = 0, float * pcldata
 			// 0-direction
 			
 			ww = wy*wz*renorm;		   
-			q1 = (wx > 0.9) ? 2. : 1.;
+			q1 = (wx > 0.9f) ? 2.f : 1.f;
 			
 			if (x.setCoord(0, 0, 0))
 			{
 				ker(x) += ww * wy * wz * q1;
 				x.setCoord((linesize+sx)%linesize, 0, 0);
 				ker(x) -= ww * wy * wz;
-				if (wx > 0.9)
+				if (wx > 0.9f)
 				{
 					x.setCoord((linesize-sx)%linesize, 0, 0);
 					ker(x) -= ww * wy * wz;
@@ -981,137 +979,137 @@ void generateCICKernel(Field<Real> & ker, const long numpcl = 0, float * pcldata
 			
 			if (x.setCoord(0, 0, (linesize+sz)%linesize))
 			{
-				ker(x) += ww * wy * (1.-wz) * q1;
+				ker(x) += ww * wy * (1.f-wz) * q1;
 				x.setCoord((linesize+sx)%linesize, 0, (linesize+sz)%linesize);
-				ker(x) -= ww * wy * (1.-wz);
-				if (wx > 0.9)
+				ker(x) -= ww * wy * (1.f-wz);
+				if (wx > 0.9f)
 				{
 					x.setCoord((linesize-sx)%linesize, 0, (linesize+sz)%linesize);
-					ker(x) -= ww * wy * (1.-wz);
+					ker(x) -= ww * wy * (1.f-wz);
 				}
 			}
 			
 			if (x.setCoord(0, (linesize+sy)%linesize, 0))
 			{
-				ker(x) += ww * (1.-wy) * wz * q1;
+				ker(x) += ww * (1.f-wy) * wz * q1;
 				x.setCoord((linesize+sx)%linesize, (linesize+sy)%linesize, 0);
-				ker(x) -= ww * (1.-wy) * wz;
+				ker(x) -= ww * (1.f-wy) * wz;
 				if (wx > 0.9)
 				{
 					x.setCoord((linesize-sx)%linesize, (linesize+sy)%linesize, 0);
-					ker(x) -= ww * (1.-wy) * wz;
+					ker(x) -= ww * (1.f-wy) * wz;
 				}
 			}
 			
 			if (x.setCoord(0, (linesize+sy)%linesize, (linesize+sz)%linesize))
 			{
-				ker(x) += ww * (1.-wy) * (1.-wz) * q1;
+				ker(x) += ww * (1.f-wy) * (1.f-wz) * q1;
 				x.setCoord((linesize+sx)%linesize, (linesize+sy)%linesize, (linesize+sz)%linesize);
-				ker(x) -= ww * (1.-wy) * (1.-wz);
-				if (wx > 0.9)
+				ker(x) -= ww * (1.f-wy) * (1.f-wz);
+				if (wx > 0.9f)
 				{
 					x.setCoord((linesize-sx)%linesize, (linesize+sy)%linesize, (linesize+sz)%linesize);
-					ker(x) -= ww * (1.-wy) * (1.-wz);
+					ker(x) -= ww * (1.f-wy) * (1.f-wz);
 				}
 			}
 			
 			// 1-direction
 			
 			ww = wx*wz*renorm;
-			q1 = (wy > 0.9) ? 2. : 1.;
+			q1 = (wy > 0.9f) ? 2.f : 1.f;
 			
 			if (x.setCoord(0, 0, 0))
 			{
 				ker(x) += ww * wx * wz * q1;
 				x.setCoord((linesize+sx)%linesize, 0, 0);
-				ker(x) += ww * (1.-wx) * wz * q1;
+				ker(x) += ww * (1.f-wx) * wz * q1;
 			}
 			
 			if (x.setCoord(0, 0, (linesize+sz)%linesize))
 			{
-				ker(x) += ww * wx * (1.-wz) * q1;
+				ker(x) += ww * wx * (1.f-wz) * q1;
 				x.setCoord((linesize+sx)%linesize, 0, (linesize+sz)%linesize);
-				ker(x) += ww * (1.-wx) * (1.-wz) * q1;
+				ker(x) += ww * (1.f-wx) * (1.f-wz) * q1;
 			}
 			
 			if (x.setCoord(0, (linesize+sy)%linesize, 0))
 			{
 				ker(x) -= ww * wx * wz;
 				x.setCoord((linesize+sx)%linesize, (linesize+sy)%linesize, 0);
-				ker(x) -= ww * (1.-wx) * wz;
+				ker(x) -= ww * (1.f-wx) * wz;
 			}
 			
 			if (x.setCoord(0, (linesize+sy)%linesize, (linesize+sz)%linesize))
 			{
-				ker(x) -= ww * wx * (1.-wz);
+				ker(x) -= ww * wx * (1.f-wz);
 				x.setCoord((linesize+sx)%linesize, (linesize+sy)%linesize, (linesize+sz)%linesize);
-				ker(x) -= ww * (1.-wx) * (1.-wz);
+				ker(x) -= ww * (1.f-wx) * (1.f-wz);
 			}
 			
-			if (wy > 0.9)
+			if (wy > 0.9f)
 			{
 				if (x.setCoord(0, (linesize-sy)%linesize, 0))
 				{
 					ker(x) -= ww * wx * wz;
 					x.setCoord((linesize+sx)%linesize, (linesize-sy)%linesize, 0);
-					ker(x) -= ww * (1.-wx) * wz;
+					ker(x) -= ww * (1.f-wx) * wz;
 				}
 				
 				if (x.setCoord(0, (linesize-sy)%linesize, (linesize+sz)%linesize))
 				{
-					ker(x) -= ww * wx * (1.-wz);
+					ker(x) -= ww * wx * (1.f-wz);
 					x.setCoord((linesize+sx)%linesize, (linesize-sy)%linesize, (linesize+sz)%linesize);
-					ker(x) -= ww * (1.-wx) * (1.-wz);
+					ker(x) -= ww * (1.f-wx) * (1.f-wz);
 				}
 			}
 						
 			// 2-direction
 			
 			ww = wx*wy*renorm;
-			q1 = (wz > 0.9) ? 2. : 1.;
+			q1 = (wz > 0.9f) ? 2.f : 1.f;
 			
 			if (x.setCoord(0, 0, 0))
 			{
 				ker(x) += ww * wx * wy * q1;
 				x.setCoord((linesize+sx)%linesize, 0, 0);
-				ker(x) += ww * (1.-wx) * wy * q1;
+				ker(x) += ww * (1.f-wx) * wy * q1;
 			}
 			
 			if (x.setCoord(0, (linesize+sy)%linesize, 0))
 			{
-				ker(x) += ww * wx * (1.-wy) * q1;
+				ker(x) += ww * wx * (1.f-wy) * q1;
 				x.setCoord((linesize+sx)%linesize, (linesize+sy)%linesize, 0);
-				ker(x) += ww * (1.-wx) * (1.-wy) * q1;
+				ker(x) += ww * (1.f-wx) * (1.f-wy) * q1;
 			}
 			
 			if (x.setCoord(0, 0, (linesize+sz)%linesize))
 			{
 				ker(x) -= ww * wx * wy;
 				x.setCoord((linesize+sx)%linesize, 0, (linesize+sz)%linesize);
-				ker(x) -= ww * (1.-wx) * wy;
+				ker(x) -= ww * (1.f-wx) * wy;
 			}
 			
 			if (x.setCoord(0, (linesize+sy)%linesize, (linesize+sz)%linesize))
 			{
-				ker(x) -= ww * wx * (1.-wy);
+				ker(x) -= ww * wx * (1.f-wy);
 				x.setCoord((linesize+sx)%linesize, (linesize+sy)%linesize, (linesize+sz)%linesize);
-				ker(x) -= ww * (1.-wx) * (1.-wy);
+				ker(x) -= ww * (1.f-wx) * (1.f-wy);
 			}
 			
-			if (wz > 0.9)
+			if (wz > 0.9f)
 			{
 				if (x.setCoord(0, 0, (linesize-sz)%linesize))
 				{
 					ker(x) -= ww * wx * wy;
 					x.setCoord((linesize+sx)%linesize, 0, (linesize-sz)%linesize);
-					ker(x) -= ww * (1.-wx) * wy;
+					ker(x) -= ww * (1.f-wx) * wy;
 				}
 				
 				if (x.setCoord(0, (linesize+sy)%linesize, (linesize-sz)%linesize))
 				{
-					ker(x) -= ww * wx * (1.-wy);
+					ker(x) -= ww * wx * (1.f-wy);
 					x.setCoord((linesize+sx)%linesize, (linesize+sy)%linesize, (linesize-sz)%linesize);
-					ker(x) -= ww * (1.-wx) * (1.-wy);
+					ker(x) -= ww * (1.f-wx) * (1.f-wy);
 				}
 			}
 		}

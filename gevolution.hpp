@@ -116,103 +116,20 @@ void prepareFTsource(Field<Real> & phi, Field<Real> & Tij, Field<Real> & Sij, co
 {
 	Field<Real> * fields[3] = {&Sij, &Tij, &phi};
 	double params = coeff;
+	double * d_params;
+
+	cudaMalloc(&d_params, sizeof(double));
+	cudaMemcpy(d_params, &params, sizeof(double), cudaMemcpyDefault);
 
 	int numpts = phi.lattice().sizeLocal(0);
 	int block_x = phi.lattice().sizeLocal(1);
 	int block_y = phi.lattice().sizeLocal(2);
 
-	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepareFTsource_Tij_functor(), numpts, fields, 3, &params, nullptr, nullptr);
+	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepareFTsource_Tij_functor(), numpts, fields, 3, d_params, nullptr, nullptr);
 
 	cudaDeviceSynchronize();
 
-/*	Site x(phi.lattice());
-	
-	for (x.first(); x.test(); x.next())
-	{
-		// 0-0-component:
-		Sij(x, 0, 0) = coeff * Tij(x, 0, 0);
-#ifdef PHINONLINEAR
-#ifdef ORIGINALMETRIC
-		Sij(x, 0, 0) -= 4. * phi(x) * (phi(x-0) + phi(x+0) - 2. * phi(x));
-		Sij(x, 0, 0) -= 0.5 * (phi(x+0) - phi(x-0)) * (phi(x+0) - phi(x-0));
-#else
-		Sij(x, 0, 0) += 0.5 * (phi(x+0) - phi(x-0)) * (phi(x+0) - phi(x-0));
-#endif
-#endif
-
-		// 1-1-component:
-		Sij(x, 1, 1) = coeff * Tij(x, 1, 1);
-#ifdef PHINONLINEAR
-#ifdef ORIGINALMETRIC
-		Sij(x, 1, 1) -= 4. * phi(x) * (phi(x-1) + phi(x+1) - 2. * phi(x));
-		Sij(x, 1, 1) -= 0.5 * (phi(x+1) - phi(x-1)) * (phi(x+1) - phi(x-1));
-#else
-		Sij(x, 1, 1) += 0.5 * (phi(x+1) - phi(x-1)) * (phi(x+1) - phi(x-1));
-#endif
-#endif
-
-		// 2-2-component:
-		Sij(x, 2, 2) = coeff * Tij(x, 2, 2);
-#ifdef PHINONLINEAR
-#ifdef ORIGINALMETRIC
-		Sij(x, 2, 2) -= 4. * phi(x) * (phi(x-2) + phi(x+2) - 2. * phi(x));
-		Sij(x, 2, 2) -= 0.5 * (phi(x+2) - phi(x-2)) * (phi(x+2) - phi(x-2));
-#else
-		Sij(x, 2, 2) += 0.5 * (phi(x+2) - phi(x-2)) * (phi(x+2) - phi(x-2));
-#endif
-#endif
-
-		// 0-1-component:
-		Sij(x, 0, 1) = coeff * Tij(x, 0, 1);
-#ifdef PHINONLINEAR
-		Sij(x, 0, 1) += phi(x+0) * phi(x+1) - phi(x) * phi(x+0+1);
-#ifdef ORIGINALMETRIC
-		Sij(x, 0, 1) -= 1.5 * phi(x) * phi(x);
-		Sij(x, 0, 1) += 1.5 * phi(x+0) * phi(x+0);
-		Sij(x, 0, 1) += 1.5 * phi(x+1) * phi(x+1);
-		Sij(x, 0, 1) -= 1.5 * phi(x+0+1) * phi(x+0+1);
-#else
-		Sij(x, 0, 1) += 0.5 * phi(x) * phi(x);
-		Sij(x, 0, 1) -= 0.5 * phi(x+0) * phi(x+0);
-		Sij(x, 0, 1) -= 0.5 * phi(x+1) * phi(x+1);
-		Sij(x, 0, 1) += 0.5 * phi(x+0+1) * phi(x+0+1);
-#endif
-#endif
-
-		// 0-2-component:
-		Sij(x, 0, 2) = coeff * Tij(x, 0, 2);
-#ifdef PHINONLINEAR
-		Sij(x, 0, 2) += phi(x+0) * phi(x+2) - phi(x) * phi(x+0+2);
-#ifdef ORIGINALMETRIC
-		Sij(x, 0, 2) -= 1.5 * phi(x) * phi(x);
-		Sij(x, 0, 2) += 1.5 * phi(x+0) * phi(x+0);
-		Sij(x, 0, 2) += 1.5 * phi(x+2) * phi(x+2);
-		Sij(x, 0, 2) -= 1.5 * phi(x+0+2) * phi(x+0+2);
-#else
-		Sij(x, 0, 2) += 0.5 * phi(x) * phi(x);
-		Sij(x, 0, 2) -= 0.5 * phi(x+0) * phi(x+0);
-		Sij(x, 0, 2) -= 0.5 * phi(x+2) * phi(x+2);
-		Sij(x, 0, 2) += 0.5 * phi(x+0+2) * phi(x+0+2);
-#endif
-#endif
-
-		// 1-2-component:
-		Sij(x, 1, 2) = coeff * Tij(x, 1, 2);
-#ifdef PHINONLINEAR
-		Sij(x, 1, 2) += phi(x+1) * phi(x+2) - phi(x) * phi(x+1+2);
-#ifdef ORIGINALMETRIC
-		Sij(x, 1, 2) -= 1.5 * phi(x) * phi(x);
-		Sij(x, 1, 2) += 1.5 * phi(x+1) * phi(x+1);
-		Sij(x, 1, 2) += 1.5 * phi(x+2) * phi(x+2);
-		Sij(x, 1, 2) -= 1.5 * phi(x+1+2) * phi(x+1+2);
-#else
-		Sij(x, 1, 2) += 0.5 * phi(x) * phi(x);
-		Sij(x, 1, 2) -= 0.5 * phi(x+1) * phi(x+1);
-		Sij(x, 1, 2) -= 0.5 * phi(x+2) * phi(x+2);
-		Sij(x, 1, 2) += 0.5 * phi(x+1+2) * phi(x+1+2);
-#endif
-#endif
-	}*/
+	cudaFree(d_params);
 }
 
 //////////////////////////
@@ -292,27 +209,6 @@ double prepareFTsource(Field<Real> & phi, Field<Real> & chi, Field<Real> & sourc
 	parallel.sum<double>(sum);
 
 	return sum;
-
-/*	Site x(phi.lattice());
-	
-	for (x.first(); x.test(); x.next())
-	{
-		result(x) = coeff2 * (source(x) - bgmodel);
-#ifdef PHINONLINEAR
-#ifdef ORIGINALMETRIC
-		result(x) *= 1. - 4. * phi(x);
-		result(x) -= 0.375 * (phi(x-0) - phi(x+0)) * (phi(x-0) - phi(x+0));
-		result(x) -= 0.375 * (phi(x-1) - phi(x+1)) * (phi(x-1) - phi(x+1));
-		result(x) -= 0.375 * (phi(x-2) - phi(x+2)) * (phi(x-2) - phi(x+2));
-#else
-		result(x) *= 1. - 2. * phi(x) * (1. - phi(x));
-		result(x) += 0.125 * (phi(x-0) - phi(x+0)) * (phi(x-0) - phi(x+0));
-		result(x) += 0.125 * (phi(x-1) - phi(x+1)) * (phi(x-1) - phi(x+1));
-		result(x) += 0.125 * (phi(x-2) - phi(x+2)) * (phi(x-2) - phi(x+2));
-#endif
-#endif
-		result(x) += (coeff3 * (1. - 3. * phi(x)) - coeff) * phi(x) - coeff3 * chi(x);
-	}*/
 }
 
 
@@ -371,13 +267,6 @@ void projectFTscalar(Field<Cplx> & SijFT, Field<Cplx> & chiFT, const int add = 0
 		kshift[i] = gridk2[i] * Cplx(cos(M_PI * (Real) i / (Real) linesize), -sin(M_PI * (Real) i / (Real) linesize));
 		gridk2[i] *= gridk2[i];
 	}
-
-	/*k.first();
-	if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
-	{
-		chiFT(k) = Cplx(0,0);
-		k.next();
-	}*/
 	
 	if (add)
 	{
@@ -404,16 +293,6 @@ void projectFTscalar(Field<Cplx> & SijFT, Field<Cplx> & chiFT, const int add = 0
 				}
 			}
 		}
-		/*for (; k.test(); k.next())
-		{
-			chiFT(k) += ((gridk2[k.coord(1)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(0)]) * SijFT(k, 0, 0) +
-						(gridk2[k.coord(0)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(1)]) * SijFT(k, 1, 1) +
-						(gridk2[k.coord(0)] + gridk2[k.coord(1)] - Real(2) * gridk2[k.coord(2)]) * SijFT(k, 2, 2) -
-						Real(6) * kshift[k.coord(0)] * kshift[k.coord(1)] * SijFT(k, 0, 1) -
-						Real(6) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2) -
-						Real(6) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2)) /
-						(Real(2) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * linesize);
-		}*/
 	}
 	else
 	{
@@ -440,16 +319,6 @@ void projectFTscalar(Field<Cplx> & SijFT, Field<Cplx> & chiFT, const int add = 0
 				}
 			}
 		}
-		/*for (; k.test(); k.next())
-		{
-			chiFT(k) = ((gridk2[k.coord(1)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(0)]) * SijFT(k, 0, 0) +
-						(gridk2[k.coord(0)] + gridk2[k.coord(2)] - Real(2) * gridk2[k.coord(1)]) * SijFT(k, 1, 1) +
-						(gridk2[k.coord(0)] + gridk2[k.coord(1)] - Real(2) * gridk2[k.coord(2)]) * SijFT(k, 2, 2) -
-						Real(6) * kshift[k.coord(0)] * kshift[k.coord(1)] * SijFT(k, 0, 1) -
-						Real(6) * kshift[k.coord(0)] * kshift[k.coord(2)] * SijFT(k, 0, 2) -
-						Real(6) * kshift[k.coord(1)] * kshift[k.coord(2)] * SijFT(k, 1, 2)) /
-						(Real(2) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]) * linesize);
-		}*/
 	}
 
 	if (k.setCoord(0, 0, 0))
@@ -904,20 +773,6 @@ void projectFTtensor(Field<Cplx> & SijFT, Field<Cplx> & hijFT)
 			hijFT(k, i) = Cplx(0,0);
 	}
 	
-	/*k.first();
-	if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
-	{
-		for (int i = 0; i < hijFT.components(); i++)
-			hijFT(k, i) = Cplx(0,0);
-			
-		k.next();
-	}
-	
-	for (; k.test(); k.next())
-	{
-		
-	}*/
-	
 	if (linesize > STACK_ALLOCATION_LIMIT)
 	{
 		free(gridk2);
@@ -985,21 +840,6 @@ void solveModifiedPoissonFT(Field<Cplx> & sourceFT, Field<Cplx> & potFT, Real co
 	{
 		potFT(k) = Cplx(0,0);
 	}
-	
-	/*k.first();
-	if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
-	{
-		if (modif == 0)
-			potFT(k) = Cplx(0,0);
-		else
-			potFT(k) = sourceFT(k) * coeff / modif;
-		k.next();
-	}
-	
-	for (; k.test(); k.next())
-	{
-		potFT(k) = sourceFT(k) * coeff / (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)] + modif);
-	}*/
 	
 	if (linesize > STACK_ALLOCATION_LIMIT)
 		free(gridk2);
@@ -3208,20 +3048,40 @@ void projection_Ti0_project(perfParticles<part_simple, part_simple_info> * pcls,
 void projectFTtheta(Field<Cplx> & thFT, Field<Cplx> & viFT)
 {
 	const int linesize = thFT.lattice().size(1);
-	int i;
 	Real * gridk;
 	rKSite k(thFT.lattice());
-	Cplx tmp(0., 0.);
 
-	gridk = (Real *) malloc(linesize * sizeof(Real));
+	if (linesize <= STACK_ALLOCATION_LIMIT)
+		gridk = (Real *) alloca(linesize * sizeof(Real));
+	else
+		gridk = (Real *) malloc(linesize * sizeof(Real));
 
-	for (i = 0; i < linesize; i++)
+#pragma omp parallel for
+	for (int i = 0; i < linesize; i++)
 		gridk[i] = (Real) linesize * sin(M_PI * 2.0 * (Real) i / (Real) linesize);
 
-	for (k.first(); k.test(); k.next())
-		thFT(k) = Cplx(0.,1.)*(gridk[k.coord(0)] * viFT(k,0) + gridk[k.coord(1)] * viFT(k,1) + gridk[k.coord(2)] * viFT(k,2));
+#pragma omp parallel for collapse(2) default(shared) firstprivate(k)
+	for (int i = 0; i < viFT.lattice().sizeLocal(1); i++)
+	{
+		for (int j = 0; j < viFT.lattice().sizeLocal(2); j++)
+		{
+			if (!k.setCoord(0, j + viFT.lattice().coordSkip()[0], i + viFT.lattice().coordSkip()[1]))
+			{
+				std::cerr << "proc#" << parallel.rank() << ": Error in projectFTtheta! Could not set coordinates at k=(0, " << j + viFT.lattice().coordSkip()[0] << ", " << i + viFT.lattice().coordSkip()[1] << ")" << std::endl;
+				throw std::runtime_error("Error in projectFTtheta: Could not set coordinates.");
+			}
 
-	free(gridk);
+			for (int z = 0; z < viFT.lattice().sizeLocal(0); z++)
+			{
+				thFT(k) = Cplx(0.,1.)*(gridk[k.coord(0)] * viFT(k,0) + gridk[k.coord(1)] * viFT(k,1) + gridk[k.coord(2)] * viFT(k,2));
+
+				k.next();
+			}
+		}
+	}
+
+	if (linesize > STACK_ALLOCATION_LIMIT)
+		free(gridk);
 }
 
 
@@ -3242,55 +3102,72 @@ void projectFTtheta(Field<Cplx> & thFT, Field<Cplx> & viFT)
 void projectFTomega(Field<Cplx> & viFT)
 {
 	const int linesize = viFT.lattice().size(1);
-	int i;
 	Real * gridk2;
-	Cplx * kshift;
 	Real * gridk;
 	rKSite k(viFT.lattice());
 	Cplx tmp(0., 0.);
 	Cplx vr[3];
 
-	gridk2 = (Real *) malloc(linesize * sizeof(Real));
-	gridk = (Real *) malloc(linesize * sizeof(Real));
+	if (linesize <= STACK_ALLOCATION_LIMIT)
+	{
+		gridk2 = (Real *) alloca(linesize * sizeof(Real));
+		gridk = (Real *) alloca(linesize * sizeof(Real));
+	}
+	else
+	{
+		gridk2 = (Real *) malloc(linesize * sizeof(Real));
+		gridk = (Real *) malloc(linesize * sizeof(Real));
+	}
 
-	for (i = 0; i < linesize; i++)
+#pragma omp parallel for
+	for (int i = 0; i < linesize; i++)
 	{
 		gridk[i] = (Real) linesize * sin(M_PI * 2.0 * (Real) i / (Real) linesize);
 		gridk2[i] = gridk[i]*gridk[i];
     }
 
-	k.first();
-	if (k.coord(0) == 0 && k.coord(1) == 0 && k.coord(2) == 0)
+#pragma omp parallel for collapse(2) default(shared) firstprivate(k) private(tmp, vr)
+	for (int i = 0; i < viFT.lattice().sizeLocal(1); i++)
 	{
-		viFT(k,0) = Cplx(0.,0.);
-		viFT(k,1) = Cplx(0.,0.);
-		viFT(k,2) = Cplx(0.,0.);
-		k.next();
+		for (int j = 0; j < viFT.lattice().sizeLocal(2); j++)
+		{
+			if (!k.setCoord(0, j + viFT.lattice().coordSkip()[0], i + viFT.lattice().coordSkip()[1]))
+			{
+				std::cerr << "proc#" << parallel.rank() << ": Error in projectFTomega! Could not set coordinates at k=(0, " << j + viFT.lattice().coordSkip()[0] << ", " << i + viFT.lattice().coordSkip()[1] << ")" << std::endl;
+				throw std::runtime_error("Error in projectFTomega: Could not set coordinates.");
+			}
+
+			for (int z = 0; z < viFT.lattice().sizeLocal(0); z++)
+			{
+				if ((k.coord(0) == 0 || k.coord(0) == linesize/2) && (k.coord(1) == 0 || k.coord(1) == linesize/2) && (k.coord(2) == 0 || k.coord(2) == linesize/2))
+				{
+					viFT(k, 0) = Cplx(0.,0.);
+					viFT(k, 1) = Cplx(0.,0.);
+					viFT(k, 2) = Cplx(0.,0.);
+				}
+				else
+				{
+					tmp = (gridk[k.coord(0)] * viFT(k,0) + gridk[k.coord(1)] * viFT(k,1) + gridk[k.coord(2)] * viFT(k,2)) / (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]);
+
+					vr[0] = (viFT(k,0) - gridk[k.coord(0)] * tmp);
+					vr[1] = (viFT(k,1) - gridk[k.coord(1)] * tmp);
+					vr[2] = (viFT(k,2) - gridk[k.coord(2)] * tmp);
+					
+					viFT(k,0) = Cplx(0.,1.)*(gridk[k.coord(1)]*vr[2] - gridk[k.coord(2)]*vr[1]);
+					viFT(k,1) = Cplx(0.,1.)*(gridk[k.coord(2)]*vr[0] - gridk[k.coord(0)]*vr[2]);
+					viFT(k,2) = Cplx(0.,1.)*(gridk[k.coord(0)]*vr[1] - gridk[k.coord(1)]*vr[0]);
+				}
+
+				k.next();
+			}
+		}
 	}
-	
-	for (; k.test(); k.next())
+
+	if (linesize > STACK_ALLOCATION_LIMIT)
 	{
-		if ((k.coord(0) == 0 || k.coord(0) == linesize/2) && (k.coord(1) == 0 || k.coord(1) == linesize/2) && (k.coord(2) == 0 || k.coord(2) == linesize/2))
-		{
-			viFT(k, 0) = Cplx(0.,0.);
-			viFT(k, 1) = Cplx(0.,0.);
-			viFT(k, 2) = Cplx(0.,0.);
-		}
-		else
-		{
-			tmp = (gridk[k.coord(0)] * viFT(k,0) + gridk[k.coord(1)] * viFT(k,1) + gridk[k.coord(2)] * viFT(k,2)) / (gridk2[k.coord(0)] + gridk2[k.coord(1)] + gridk2[k.coord(2)]);
-
-			vr[0] = (viFT(k,0) - gridk[k.coord(0)] * tmp);
-			vr[1] = (viFT(k,1) - gridk[k.coord(1)] * tmp);
-			vr[2] = (viFT(k,2) - gridk[k.coord(2)] * tmp);
-			
-			viFT(k,0) = Cplx(0.,1.)*(gridk[k.coord(1)]*vr[2] - gridk[k.coord(2)]*vr[1]);
-			viFT(k,1) = Cplx(0.,1.)*(gridk[k.coord(2)]*vr[0] - gridk[k.coord(0)]*vr[2]);
-			viFT(k,2) = Cplx(0.,1.)*(gridk[k.coord(0)]*vr[1] - gridk[k.coord(1)]*vr[0]);
-		}
+		free(gridk2);
+		free(gridk);
 	}
-
-	free(gridk2);
 }
 
 #endif

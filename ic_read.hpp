@@ -303,8 +303,7 @@ void readIC(metadata & sim, icsettings & ic, cosmology & cosmo, const double fou
 		zetaFT->alloc();
 
 		plan_phi->execute(FFT_FORWARD);
-		for (kFT.first(); kFT.test(); kFT.next())
-			(*zetaFT)(kFT) = (*scalarFT)(kFT);
+		cudaMemcpy(zetaFT->data(), scalarFT->data(), scalarFT->lattice().sitesLocalGross() * sizeof(Cplx), cudaMemcpyDefault);
 	}
 #endif
 	

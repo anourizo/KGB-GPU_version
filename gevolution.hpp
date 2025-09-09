@@ -30,6 +30,7 @@
 #define GEVOLUTION_HEADER
 
 #include "lattice_loop.hpp"
+#include <cuda/atomic>
 
 #ifndef Cplx
 #define Cplx Imag
@@ -1688,6 +1689,17 @@ void projection_Tij_comm2(Field<Real> * field)
 __host__ __device__ void particle_T00_project(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
 {	
 	Real mass = partInfo.mass * params[1] / (dx*dx*dx);
+	#ifdef __CUDA_ARCH__
+	unsigned int laneID;
+	unsigned mask;
+	asm volatile ("mov.u32 %0, %laneid;" : "=r"(laneID));
+	mask = __activemask();
+	Real local_stencil[8] = {Real(0),Real(0),Real(0),Real(0),Real(0),Real(0),Real(0),Real(0)};
+	long siteindex = sites[0].index();
+	long siteindex2;
+	bool write_atomic = true;
+	Real temp;
+	#endif
 
 	if (nfield > 1)
 	{
@@ -1709,14 +1721,22 @@ __host__ __device__ void particle_T00_project(double dtau, double dx, part_simpl
 		phi[7] = (*fields[1])(sites[1]+0+1+2);
 
 		#ifdef __CUDA_ARCH__
-		atomicAdd(&(*fields[0])(sites[0]), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[0] + f2 * phi[0] * phi[0]) * mass);
+		local_stencil[0] = (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[0] + f2 * phi[0] * phi[0]);
+		local_stencil[1] = (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * (e + f * phi[1] + f2 * phi[1] * phi[1]);
+		local_stencil[2] = (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[2] + f2 * phi[2] * phi[2]);
+		local_stencil[3] = (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (e + f * phi[3] + f2 * phi[3] * phi[3]);
+		local_stencil[4] = static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[4] + f2 * phi[4] * phi[4]);
+		local_stencil[5] = static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * (e + f * phi[5] + f2 * phi[5] * phi[5]);
+		local_stencil[6] = static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[6] + f2 * phi[6] * phi[6]);
+		local_stencil[7] = static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (e + f * phi[7] + f2 * phi[7] * phi[7]);
+		/*atomicAdd(&(*fields[0])(sites[0]), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[0] + f2 * phi[0] * phi[0]) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+2), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * (e + f * phi[1] + f2 * phi[1] * phi[1]) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+1), (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[2] + f2 * phi[2] * phi[2]) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+1+2), (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (e + f * phi[3] + f2 * phi[3] * phi[3]) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+0), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[4] + f2 * phi[4] * phi[4]) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+0+2), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * (e + f * phi[5] + f2 * phi[5] * phi[5]) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+0+1), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (e + f * phi[6] + f2 * phi[6] * phi[6]) * mass);
-		atomicAdd(&(*fields[0])(sites[0]+0+1+2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (e + f * phi[7] + f2 * phi[7] * phi[7]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+1+2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (e + f * phi[7] + f2 * phi[7] * phi[7]) * mass);*/
 		#else
 		(*fields[0])(sites[0]) += (1.-ref_dist[0]) * (1.-ref_dist[1]) * (1.-ref_dist[2]) * (e + f * phi[0] + f2 * phi[0] * phi[0]) * mass;
 		(*fields[0])(sites[0]+2) += (1.-ref_dist[0]) * (1.-ref_dist[1]) * ref_dist[2] * (e + f * phi[1] + f2 * phi[1] * phi[1]) * mass;
@@ -1731,14 +1751,22 @@ __host__ __device__ void particle_T00_project(double dtau, double dx, part_simpl
 	else
 	{
 		#ifdef __CUDA_ARCH__
-		atomicAdd(&(*fields[0])(sites[0]), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass);
+		local_stencil[0] = (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2]));
+		local_stencil[1] = (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]);
+		local_stencil[2] = (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2]));
+		local_stencil[3] = (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]);
+		local_stencil[4] = static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2]));
+		local_stencil[5] = static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]);
+		local_stencil[6] = static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2]));
+		local_stencil[7] = static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]);
+		/*atomicAdd(&(*fields[0])(sites[0]), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+2), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+1), (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+1+2), (Real(1)-static_cast<Real>(ref_dist[0])) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+0), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+0+2), static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * static_cast<Real>(ref_dist[2]) * mass);
 		atomicAdd(&(*fields[0])(sites[0]+0+1), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass);
-		atomicAdd(&(*fields[0])(sites[0]+0+1+2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+1+2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * mass);*/
 		#else
 		(*fields[0])(sites[0]) += (1.-ref_dist[0]) * (1.-ref_dist[1]) * (1.-ref_dist[2]) * mass;
 		(*fields[0])(sites[0]+2) += (1.-ref_dist[0]) * (1.-ref_dist[1]) * ref_dist[2] * mass;
@@ -1750,6 +1778,39 @@ __host__ __device__ void particle_T00_project(double dtau, double dx, part_simpl
 		(*fields[0])(sites[0]+0+1+2) += ref_dist[0] * ref_dist[1] * ref_dist[2] * mass;
 		#endif
 	}
+	#ifdef __CUDA_ARCH__
+	siteindex2 = __shfl_up_sync(mask, siteindex, 1);
+	if (laneID > 0 && siteindex == siteindex2)
+	{
+		write_atomic = false;
+	}
+
+	for (int offset = 16; offset > 0; offset >>= 1)
+	{
+		siteindex2 = __shfl_down_sync(mask, siteindex, offset);
+		#pragma unroll
+		for (int i = 0; i < 8; i++)
+		{
+			temp = __shfl_down_sync(mask, local_stencil[i], offset);
+			if (mask & (1U << (laneID + offset)) && siteindex == siteindex2)
+			{
+				local_stencil[i] += temp;
+			}
+		}
+	}
+
+	if (write_atomic)
+	{
+		atomicAdd(&(*fields[0])(sites[0]), local_stencil[0] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+2), local_stencil[1] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+1), local_stencil[2] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+1+2), local_stencil[3] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0), local_stencil[4] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+2), local_stencil[5] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+1), local_stencil[6] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+1+2), local_stencil[7] * mass);
+	}
+	#endif
 }
 
 // callable struct for particle_T00_project
@@ -1929,6 +1990,17 @@ void projection_T0i_project(Particles<part,part_info,part_dataType> * pcls, Fiel
 __host__ __device__ void particle_T0i_project(double dtau, double dx, part_simple * part, double * ref_dist, part_simple_info partInfo, Field<Real> * fields[], Site * sites, int nfield, double * params, double * outputs, int noutputs)
 {	
 	Real mass = partInfo.mass * (*params) / (dx*dx*dx);
+	#ifdef __CUDA_ARCH__
+	unsigned int laneID;
+	unsigned mask;
+	asm volatile ("mov.u32 %0, %laneid;" : "=r"(laneID));
+	mask = __activemask();
+	Real local_stencil[12] = {Real(0),Real(0),Real(0),Real(0),Real(0),Real(0),Real(0),Real(0),Real(0),Real(0),Real(0),Real(0)};
+	long siteindex = sites[0].index();
+	long siteindex2;
+	bool write_atomic = true;
+	Real temp;
+	#endif
 
 	if (nfield > 1)
 	{
@@ -1944,7 +2016,20 @@ __host__ __device__ void particle_T0i_project(double dtau, double dx, part_simpl
 		phi[7] = (*fields[1])(sites[1]+0+1+2);
 
 		#ifdef __CUDA_ARCH__
-		atomicAdd(&(*fields[0])(sites[0],0), (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[0] + phi[4]) * mass * (*part).vel[0]);
+		local_stencil[0] = (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[0] + phi[4]) * (*part).vel[0];
+		local_stencil[1] = (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[0] + phi[2]) * (*part).vel[1];
+		local_stencil[2] = (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1) + phi[0] + phi[1]) * (*part).vel[2];
+		local_stencil[3] = static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[4] + phi[6]) * (*part).vel[1];
+		local_stencil[4] = static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1) + phi[4] + phi[5]) * (*part).vel[2];
+		local_stencil[5] = static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[2] + phi[6]) * (*part).vel[0];
+		local_stencil[6] = static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1) + phi[2] + phi[3]) * (*part).vel[2];
+		local_stencil[7] = static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1) + phi[1] + phi[5]) * (*part).vel[0];
+		local_stencil[8] = static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1) + phi[1] + phi[3]) * (*part).vel[1];
+		local_stencil[9] = static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (Real(1) + phi[3] + phi[7]) * (*part).vel[0];
+		local_stencil[10]= static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[2]) * (Real(1) + phi[5] + phi[7]) * (*part).vel[1];
+		local_stencil[11]= static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1) + phi[6] + phi[7]) * (*part).vel[2];
+
+		/*atomicAdd(&(*fields[0])(sites[0],0), (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[0] + phi[4]) * mass * (*part).vel[0]);
 		atomicAdd(&(*fields[0])(sites[0],1), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[0] + phi[2]) * mass * (*part).vel[1]);
 		atomicAdd(&(*fields[0])(sites[0],2), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1) + phi[0] + phi[1]) * mass * (*part).vel[2]);
 
@@ -1959,7 +2044,7 @@ __host__ __device__ void particle_T0i_project(double dtau, double dx, part_simpl
 
 		atomicAdd(&(*fields[0])(sites[0]+1+2,0), static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (Real(1) + phi[3] + phi[7]) * mass * (*part).vel[0]);
 		atomicAdd(&(*fields[0])(sites[0]+0+2,1), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[2]) * (Real(1) + phi[5] + phi[7]) * mass * (*part).vel[1]);
-		atomicAdd(&(*fields[0])(sites[0]+0+1,2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1) + phi[6] + phi[7]) * mass * (*part).vel[2]);
+		atomicAdd(&(*fields[0])(sites[0]+0+1,2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (Real(1) + phi[6] + phi[7]) * mass * (*part).vel[2]);*/
 		#else
 		(*fields[0])(sites[0],0) += (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[0] + phi[4]) * mass * (*part).vel[0];
 		(*fields[0])(sites[0],1) += (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (Real(1) + phi[0] + phi[2]) * mass * (*part).vel[1];
@@ -1982,7 +2067,20 @@ __host__ __device__ void particle_T0i_project(double dtau, double dx, part_simpl
 	else
 	{
 		#ifdef __CUDA_ARCH__
-		atomicAdd(&(*fields[0])(sites[0],0), (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[0]);
+		local_stencil[0] = (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (*part).vel[0];
+		local_stencil[1] = (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[2])) * (*part).vel[1];
+		local_stencil[2] = (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * (*part).vel[2];
+		local_stencil[3] = static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (*part).vel[1];
+		local_stencil[4] = static_cast<Real>(ref_dist[0]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (*part).vel[2];
+		local_stencil[5] = static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[2])) * (*part).vel[0];
+		local_stencil[6] = static_cast<Real>(ref_dist[1]) * (Real(1)-static_cast<Real>(ref_dist[0])) * (*part).vel[2];
+		local_stencil[7] = static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[1])) * (*part).vel[0];
+		local_stencil[8] = static_cast<Real>(ref_dist[2]) * (Real(1)-static_cast<Real>(ref_dist[0])) * (*part).vel[1];
+		local_stencil[9] = static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * (*part).vel[0];
+		local_stencil[10]= static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[2]) * (*part).vel[1];
+		local_stencil[11]= static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * (*part).vel[2];
+
+		/*atomicAdd(&(*fields[0])(sites[0],0), (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[0]);
 		atomicAdd(&(*fields[0])(sites[0],1), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[1]);
 		atomicAdd(&(*fields[0])(sites[0],2), (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[1])) * mass * (*part).vel[2]);
 
@@ -1997,7 +2095,7 @@ __host__ __device__ void particle_T0i_project(double dtau, double dx, part_simpl
 
 		atomicAdd(&(*fields[0])(sites[0]+1+2,0), static_cast<Real>(ref_dist[1]) * static_cast<Real>(ref_dist[2]) * mass * (*part).vel[0]);
 		atomicAdd(&(*fields[0])(sites[0]+0+2,1), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[2]) * mass * (*part).vel[1]);
-		atomicAdd(&(*fields[0])(sites[0]+0+1,2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * mass * (*part).vel[2]);
+		atomicAdd(&(*fields[0])(sites[0]+0+1,2), static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * mass * (*part).vel[2]);*/
 		#else
 		(*fields[0])(sites[0],0) += (Real(1)-static_cast<Real>(ref_dist[1])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[0];
 		(*fields[0])(sites[0],1) += (Real(1)-static_cast<Real>(ref_dist[0])) * (Real(1)-static_cast<Real>(ref_dist[2])) * mass * (*part).vel[1];
@@ -2017,6 +2115,48 @@ __host__ __device__ void particle_T0i_project(double dtau, double dx, part_simpl
 		(*fields[0])(sites[0]+0+1,2) += static_cast<Real>(ref_dist[0]) * static_cast<Real>(ref_dist[1]) * mass * (*part).vel[2];
 		#endif
 	}
+
+	#ifdef __CUDA_ARCH__
+	siteindex2 = __shfl_up_sync(mask, siteindex, 1);
+	if (laneID > 0 && siteindex == siteindex2)
+	{
+		write_atomic = false;
+	}
+
+	for (int offset = 16; offset > 0; offset >>= 1)
+	{
+		siteindex2 = __shfl_down_sync(mask, siteindex, offset);
+		#pragma unroll
+		for (int i = 0; i < 12; i++)
+		{
+			temp = __shfl_down_sync(mask, local_stencil[i], offset);
+			if (mask & (1U << (laneID + offset)) && siteindex == siteindex2)
+			{
+				local_stencil[i] += temp;
+			}
+		}
+	}
+
+	if (write_atomic)
+	{
+		atomicAdd(&(*fields[0])(sites[0],0), local_stencil[0] * mass);
+		atomicAdd(&(*fields[0])(sites[0],1), local_stencil[1] * mass);
+		atomicAdd(&(*fields[0])(sites[0],2), local_stencil[2] * mass);
+
+		atomicAdd(&(*fields[0])(sites[0]+0,1), local_stencil[3] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0,2), local_stencil[4] * mass);
+
+		atomicAdd(&(*fields[0])(sites[0]+1,0), local_stencil[5] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+1,2), local_stencil[6] * mass);
+
+		atomicAdd(&(*fields[0])(sites[0]+2,0), local_stencil[7] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+2,1), local_stencil[8] * mass);
+
+		atomicAdd(&(*fields[0])(sites[0]+1+2,0), local_stencil[9] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+2,1), local_stencil[10] * mass);
+		atomicAdd(&(*fields[0])(sites[0]+0+1,2), local_stencil[11] * mass);
+	}
+	#endif
 }
 
 // callable struct for particle_T0i_project
@@ -2401,6 +2541,16 @@ __host__ __device__ void particle_Tij_project(double dtau, double dx, part_simpl
 {
 	Real mass = partInfo.mass * params[1] / (dx*dx*dx) / params[0];
 	Real w;
+	#ifdef __CUDA_ARCH__
+	unsigned int laneID;
+	unsigned mask;
+	asm volatile ("mov.u32 %0, %laneid;" : "=r"(laneID));
+	mask = __activemask();
+	long siteindex = sites[0].index();
+	long siteindex2;
+	bool write_atomic = true;
+	Real temp;
+	#endif
 
 #ifdef CIC_PROJECT_TIJ
 	Real  tij[54];
@@ -2532,14 +2682,46 @@ __host__ __device__ void particle_Tij_project(double dtau, double dx, part_simpl
 	}
 
 	#ifdef __CUDA_ARCH__
-	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0],i,i), tij[8*i]);
-	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0,i,i), tij[4+8*i]);
-	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+1,i,i), tij[2+8*i]);
-	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+2,i,i), tij[1+8*i]);
-	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0+1,i,i), tij[6+8*i]);
-	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0+2,i,i), tij[5+8*i]);
-	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+1+2,i,i), tij[3+8*i]);
-	for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0+1+2,i,i), tij[7+8*i]);
+	siteindex2 = __shfl_up_sync(mask, siteindex, 1);
+	if (laneID > 0 && siteindex == siteindex2)
+	{
+		write_atomic = false;
+	}
+
+	for (int offset = 16; offset > 0; offset >>= 1)
+	{
+		siteindex2 = __shfl_down_sync(mask, siteindex, offset);
+		#pragma unroll
+		for (int i = 0; i < 24; i++)
+		{
+			temp = tij[i];
+			temp = __shfl_down_sync(mask, temp, offset);
+			if (mask & (1U << (laneID + offset)) && siteindex == siteindex2)
+			{
+				tij[i] += temp;
+			}
+		}
+	}
+
+	if (write_atomic)
+	{
+		#pragma unroll
+		for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0],i,i), tij[8*i]);
+		#pragma unroll
+		for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0,i,i), tij[4+8*i]);
+		#pragma unroll
+		for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+1,i,i), tij[2+8*i]);
+		#pragma unroll
+		for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+2,i,i), tij[1+8*i]);
+		#pragma unroll
+		for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0+1,i,i), tij[6+8*i]);
+		#pragma unroll
+		for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0+2,i,i), tij[5+8*i]);
+		#pragma unroll
+		for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+1+2,i,i), tij[3+8*i]);
+		#pragma unroll
+		for (int i=0; i<3; i++) atomicAdd(&(*fields[0])(sites[0]+0+1+2,i,i), tij[7+8*i]);
+	}
 	#else
 	for (int i=0; i<3; i++) (*fields[0])(sites[0],i,i) += tij[8*i];
 	for (int i=0; i<3; i++) (*fields[0])(sites[0]+0,i,i) += tij[4+8*i];
@@ -2588,69 +2770,91 @@ __host__ __device__ void particle_Tij_project(double dtau, double dx, part_simpl
 #endif
 
 #ifdef __CUDA_ARCH__
+	for (int offset = 16; offset > 0; offset >>= 1)
+	{
+		siteindex2 = __shfl_down_sync(mask, siteindex, offset);
+		#pragma unroll
 #ifdef CIC_PROJECT_TIJ
-	atomicAdd(&(*fields[0])(sites[0],0,1), tij[4]);
-	atomicAdd(&(*fields[0])(sites[0],0,2), tij[22]);
-	atomicAdd(&(*fields[0])(sites[0],1,2), tij[40]);
-	if (tij[0] != 0) atomicAdd(&(*fields[0])(sites[0]-0-1,0,1), tij[0]);
-	if (tij[9] != 0) atomicAdd(&(*fields[0])(sites[0]-0-1+2,0,1), tij[9]);
-	if (tij[6] != 0) atomicAdd(&(*fields[0])(sites[0]-0+1,0,1), tij[6]);
-	if (tij[30] != 0) atomicAdd(&(*fields[0])(sites[0]-0+1,0,2), tij[30]);
-	if (tij[3] != 0) atomicAdd(&(*fields[0])(sites[0]-0,0,1), tij[3]);
-	if (tij[21] != 0) atomicAdd(&(*fields[0])(sites[0]-0,0,2), tij[21]);
-	if (tij[18] != 0) atomicAdd(&(*fields[0])(sites[0]-0-2,0,2), tij[18]);
-	if (tij[27] != 0) atomicAdd(&(*fields[0])(sites[0]-0+1-2,0,2), tij[27]);
-	if (tij[12] != 0) atomicAdd(&(*fields[0])(sites[0]-0+2,0,1), tij[12]);
-	if (tij[24] != 0) atomicAdd(&(*fields[0])(sites[0]-0+2,0,2), tij[24]);
-	if (tij[1] != 0) atomicAdd(&(*fields[0])(sites[0]-1,0,1), tij[1]);
-	if (tij[39] != 0) atomicAdd(&(*fields[0])(sites[0]-1,1,2), tij[39]);
-	if (tij[36] != 0) atomicAdd(&(*fields[0])(sites[0]-1-2,1,2), tij[36]);
-	if (tij[45] != 0) atomicAdd(&(*fields[0])(sites[0]+0-1-2,1,2), tij[45]);
-	if (tij[2] != 0) atomicAdd(&(*fields[0])(sites[0]+0-1,0,1), tij[2]);
-	if (tij[48] != 0) atomicAdd(&(*fields[0])(sites[0]+0-1,1,2), tij[48]);
-	if (tij[10] != 0) atomicAdd(&(*fields[0])(sites[0]-1+2,0,1), tij[10]);
-	if (tij[42] != 0) atomicAdd(&(*fields[0])(sites[0]-1+2,1,2), tij[42]);
-	if (tij[19] != 0) atomicAdd(&(*fields[0])(sites[0]-2,0,2), tij[19]);
-	if (tij[37] != 0) atomicAdd(&(*fields[0])(sites[0]-2,1,2), tij[37]);
-	if (tij[20] != 0) atomicAdd(&(*fields[0])(sites[0]+0-2,0,2), tij[20]);
-	if (tij[46] != 0) atomicAdd(&(*fields[0])(sites[0]+0-2,1,2), tij[46]);
-	if (tij[28] != 0) atomicAdd(&(*fields[0])(sites[0]+1-2,0,2), tij[28]);
-	if (tij[38] != 0) atomicAdd(&(*fields[0])(sites[0]+1-2,1,2), tij[38]);
-	if (tij[29] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1-2,0,2), tij[29]);
-	if (tij[47] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1-2,1,2), tij[47]);
-	if (tij[11] != 0) atomicAdd(&(*fields[0])(sites[0]+0-1+2,0,1), tij[11]);
-	if (tij[51] != 0) atomicAdd(&(*fields[0])(sites[0]+0-1+2,1,2), tij[51]);
-	if (tij[15] != 0) atomicAdd(&(*fields[0])(sites[0]-0+1+2,0,1), tij[15]);
-	if (tij[33] != 0) atomicAdd(&(*fields[0])(sites[0]-0+1+2,0,2), tij[33]);
-	if (tij[5] != 0) atomicAdd(&(*fields[0])(sites[0]+0,0,1), tij[5]);
-	if (tij[23] != 0) atomicAdd(&(*fields[0])(sites[0]+0,0,2), tij[23]);
-	atomicAdd(&(*fields[0])(sites[0]+0,1,2), tij[49]);
-	if (tij[7] != 0) atomicAdd(&(*fields[0])(sites[0]+1,0,1), tij[7]);
-	atomicAdd(&(*fields[0])(sites[0]+1,0,2), tij[31]);
-	if (tij[41] != 0)  atomicAdd(&(*fields[0])(sites[0]+1,1,2), tij[41]);
-	if (tij[8] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1,0,1), tij[8]);
-	if (tij[32] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1,0,2), tij[32]);
-	if (tij[50] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1,1,2), tij[50]);
-	atomicAdd(&(*fields[0])(sites[0]+2,0,1), tij[13]);
-	if (tij[25] != 0) atomicAdd(&(*fields[0])(sites[0]+2,0,2), tij[25]);
-	if (tij[43] != 0) atomicAdd(&(*fields[0])(sites[0]+2,1,2), tij[43]);
-	if (tij[14] != 0) atomicAdd(&(*fields[0])(sites[0]+0+2,0,1), tij[14]);
-	if (tij[26] != 0) atomicAdd(&(*fields[0])(sites[0]+0+2,0,2), tij[26]);
-	if (tij[52] != 0) atomicAdd(&(*fields[0])(sites[0]+0+2,1,2), tij[52]);
-	if (tij[16] != 0) atomicAdd(&(*fields[0])(sites[0]+1+2,0,1), tij[16]);
-	if (tij[34] != 0) atomicAdd(&(*fields[0])(sites[0]+1+2,0,2), tij[34]);
-	if (tij[44] != 0) atomicAdd(&(*fields[0])(sites[0]+1+2,1,2), tij[44]);
-	if (tij[17] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1+2,0,1), tij[17]);
-	if (tij[35] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1+2,0,2), tij[35]);
-	if (tij[53] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1+2,1,2), tij[53]);
+		for (int i = 0; i < 54; i++)
 #else
-	atomicAdd(&(*fields[0])(sites[0],0,1), tij[0]);
-	atomicAdd(&(*fields[0])(sites[0],0,2), tij[2]);
-	atomicAdd(&(*fields[0])(sites[0],1,2), tij[4]);
-	atomicAdd(&(*fields[0])(sites[0]+0,1,2), tij[5]);
-	atomicAdd(&(*fields[0])(sites[0]+1,0,2), tij[3]);
-	atomicAdd(&(*fields[0])(sites[0]+2,0,1), tij[1]);
+		for (int i = 0; i < 6; i++)
 #endif
+		{
+			temp = tij[i];
+			temp = __shfl_down_sync(mask, temp, offset);
+			if (mask & (1U << (laneID + offset)) && siteindex == siteindex2)
+			{
+				tij[i] += temp;
+			}
+		}
+	}
+
+	if (write_atomic)
+	{
+#ifdef CIC_PROJECT_TIJ
+		atomicAdd(&(*fields[0])(sites[0],0,1), tij[4]);
+		atomicAdd(&(*fields[0])(sites[0],0,2), tij[22]);
+		atomicAdd(&(*fields[0])(sites[0],1,2), tij[40]);
+		if (tij[0] != 0) atomicAdd(&(*fields[0])(sites[0]-0-1,0,1), tij[0]);
+		if (tij[9] != 0) atomicAdd(&(*fields[0])(sites[0]-0-1+2,0,1), tij[9]);
+		if (tij[6] != 0) atomicAdd(&(*fields[0])(sites[0]-0+1,0,1), tij[6]);
+		if (tij[30] != 0) atomicAdd(&(*fields[0])(sites[0]-0+1,0,2), tij[30]);
+		if (tij[3] != 0) atomicAdd(&(*fields[0])(sites[0]-0,0,1), tij[3]);
+		if (tij[21] != 0) atomicAdd(&(*fields[0])(sites[0]-0,0,2), tij[21]);
+		if (tij[18] != 0) atomicAdd(&(*fields[0])(sites[0]-0-2,0,2), tij[18]);
+		if (tij[27] != 0) atomicAdd(&(*fields[0])(sites[0]-0+1-2,0,2), tij[27]);
+		if (tij[12] != 0) atomicAdd(&(*fields[0])(sites[0]-0+2,0,1), tij[12]);
+		if (tij[24] != 0) atomicAdd(&(*fields[0])(sites[0]-0+2,0,2), tij[24]);
+		if (tij[1] != 0) atomicAdd(&(*fields[0])(sites[0]-1,0,1), tij[1]);
+		if (tij[39] != 0) atomicAdd(&(*fields[0])(sites[0]-1,1,2), tij[39]);
+		if (tij[36] != 0) atomicAdd(&(*fields[0])(sites[0]-1-2,1,2), tij[36]);
+		if (tij[45] != 0) atomicAdd(&(*fields[0])(sites[0]+0-1-2,1,2), tij[45]);
+		if (tij[2] != 0) atomicAdd(&(*fields[0])(sites[0]+0-1,0,1), tij[2]);
+		if (tij[48] != 0) atomicAdd(&(*fields[0])(sites[0]+0-1,1,2), tij[48]);
+		if (tij[10] != 0) atomicAdd(&(*fields[0])(sites[0]-1+2,0,1), tij[10]);
+		if (tij[42] != 0) atomicAdd(&(*fields[0])(sites[0]-1+2,1,2), tij[42]);
+		if (tij[19] != 0) atomicAdd(&(*fields[0])(sites[0]-2,0,2), tij[19]);
+		if (tij[37] != 0) atomicAdd(&(*fields[0])(sites[0]-2,1,2), tij[37]);
+		if (tij[20] != 0) atomicAdd(&(*fields[0])(sites[0]+0-2,0,2), tij[20]);
+		if (tij[46] != 0) atomicAdd(&(*fields[0])(sites[0]+0-2,1,2), tij[46]);
+		if (tij[28] != 0) atomicAdd(&(*fields[0])(sites[0]+1-2,0,2), tij[28]);
+		if (tij[38] != 0) atomicAdd(&(*fields[0])(sites[0]+1-2,1,2), tij[38]);
+		if (tij[29] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1-2,0,2), tij[29]);
+		if (tij[47] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1-2,1,2), tij[47]);
+		if (tij[11] != 0) atomicAdd(&(*fields[0])(sites[0]+0-1+2,0,1), tij[11]);
+		if (tij[51] != 0) atomicAdd(&(*fields[0])(sites[0]+0-1+2,1,2), tij[51]);
+		if (tij[15] != 0) atomicAdd(&(*fields[0])(sites[0]-0+1+2,0,1), tij[15]);
+		if (tij[33] != 0) atomicAdd(&(*fields[0])(sites[0]-0+1+2,0,2), tij[33]);
+		if (tij[5] != 0) atomicAdd(&(*fields[0])(sites[0]+0,0,1), tij[5]);
+		if (tij[23] != 0) atomicAdd(&(*fields[0])(sites[0]+0,0,2), tij[23]);
+		atomicAdd(&(*fields[0])(sites[0]+0,1,2), tij[49]);
+		if (tij[7] != 0) atomicAdd(&(*fields[0])(sites[0]+1,0,1), tij[7]);
+		atomicAdd(&(*fields[0])(sites[0]+1,0,2), tij[31]);
+		if (tij[41] != 0)  atomicAdd(&(*fields[0])(sites[0]+1,1,2), tij[41]);
+		if (tij[8] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1,0,1), tij[8]);
+		if (tij[32] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1,0,2), tij[32]);
+		if (tij[50] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1,1,2), tij[50]);
+		atomicAdd(&(*fields[0])(sites[0]+2,0,1), tij[13]);
+		if (tij[25] != 0) atomicAdd(&(*fields[0])(sites[0]+2,0,2), tij[25]);
+		if (tij[43] != 0) atomicAdd(&(*fields[0])(sites[0]+2,1,2), tij[43]);
+		if (tij[14] != 0) atomicAdd(&(*fields[0])(sites[0]+0+2,0,1), tij[14]);
+		if (tij[26] != 0) atomicAdd(&(*fields[0])(sites[0]+0+2,0,2), tij[26]);
+		if (tij[52] != 0) atomicAdd(&(*fields[0])(sites[0]+0+2,1,2), tij[52]);
+		if (tij[16] != 0) atomicAdd(&(*fields[0])(sites[0]+1+2,0,1), tij[16]);
+		if (tij[34] != 0) atomicAdd(&(*fields[0])(sites[0]+1+2,0,2), tij[34]);
+		if (tij[44] != 0) atomicAdd(&(*fields[0])(sites[0]+1+2,1,2), tij[44]);
+		if (tij[17] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1+2,0,1), tij[17]);
+		if (tij[35] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1+2,0,2), tij[35]);
+		if (tij[53] != 0) atomicAdd(&(*fields[0])(sites[0]+0+1+2,1,2), tij[53]);
+#else
+		atomicAdd(&(*fields[0])(sites[0],0,1), tij[0]);
+		atomicAdd(&(*fields[0])(sites[0],0,2), tij[2]);
+		atomicAdd(&(*fields[0])(sites[0],1,2), tij[4]);
+		atomicAdd(&(*fields[0])(sites[0]+0,1,2), tij[5]);
+		atomicAdd(&(*fields[0])(sites[0]+1,0,2), tij[3]);
+		atomicAdd(&(*fields[0])(sites[0]+2,0,1), tij[1]);
+#endif
+	}
 #else
 #ifdef CIC_PROJECT_TIJ
 	(*fields[0])(sites[0],0,1) += tij[4];

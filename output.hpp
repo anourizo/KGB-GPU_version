@@ -124,7 +124,9 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 			
 	if (sim.out_snapshot & MASK_RBARE || sim.out_snapshot & MASK_POT)
 	{
-		projection_init(source);
+		//projection_init(source);
+		nvtxRangePushA("particle projection");
+		thrust::fill_n(thrust::device, source->data(), source->lattice().sitesLocalGross(), Real(0));
 		scalarProjectionCIC_project(pcls_cdm, source);
 		if (sim.baryon_flag)
 			scalarProjectionCIC_project(pcls_b, source);
@@ -134,6 +136,7 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 			scalarProjectionCIC_project(pcls_ncdm+i, source);
 		}
 		scalarProjectionCIC_comm(source);
+		nvtxRangePop();
 	}
 
 	if (sim.out_snapshot & MASK_RBARE)
@@ -158,7 +161,8 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 	if (sim.out_snapshot & MASK_T00)
 	{
 		nvtxRangePushA("T00 output");
-		projection_init(source);
+		//projection_init(source);
+		thrust::fill_n(thrust::device, source->data(), source->lattice().sitesLocalGross(), Real(0));
 		if (sim.gr_flag > 0)
 		{
 			projection_T00_project(pcls_cdm, source, a, phi);
@@ -304,7 +308,8 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 	if (sim.out_snapshot & MASK_TIJ)
 	{	
 		nvtxRangePushA("Tij output");				
-		projection_init(Sij);
+		//projection_init(Sij);
+		thrust::fill_n(thrust::device, Sij->data(), 6*Sij->lattice().sitesLocalGross(), Real(0));
 		projection_Tij_project(pcls_cdm, Sij, a, phi);
 		if (sim.baryon_flag)
 			projection_Tij_project(pcls_b, Sij, a, phi);
@@ -325,7 +330,8 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 	if (sim.out_snapshot & MASK_P)
 	{
 		nvtxRangePushA("p (momentum density) output");
-		projection_init(Bi);
+		//projection_init(Bi);
+		thrust::fill_n(thrust::device, Bi->data(), 3*Bi->lattice().sitesLocalGross(), Real(0));
 		projection_T0i_project(pcls_cdm, Bi, phi);
 		if (sim.baryon_flag)
 			projection_T0i_project(pcls_b, Bi, phi);
@@ -353,7 +359,8 @@ void writeSnapshots(metadata & sim, cosmology & cosmo, const double fourpiG, con
 		nvtxRangePushA("B check output");
 		if (sim.vector_flag == VECTOR_PARABOLIC)
 		{
-			projection_init(Bi_check);
+			//projection_init(Bi_check);
+			thrust::fill_n(thrust::device, Bi_check->data(), 3*Bi_check->lattice().sitesLocalGross(), Real(0));
 			projection_T0i_project(pcls_cdm, Bi_check, phi);
 			if (sim.baryon_flag)
 				projection_T0i_project(pcls_b, Bi_check, phi);
@@ -2811,7 +2818,8 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 
 	if (sim.out_pk & MASK_RBARE || sim.out_pk & MASK_DBARE || sim.out_pk & MASK_POT || ((sim.out_pk & MASK_T00 || sim.out_pk & MASK_DELTA) && sim.gr_flag == 0))
 	{
-		projection_init(source);
+		//projection_init(source);
+		thrust::fill_n(thrust::device, source->data(), source->lattice().sitesLocalGross(), Real(0));
 #ifdef HAVE_CLASS
 		if ((sim.radiation_flag > 0 || sim.fluid_flag > 0) && sim.gr_flag == 0)
 		{
@@ -2879,7 +2887,8 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 				
 		if ((cosmo.num_ncdm > 0 || sim.baryon_flag) && (sim.out_pk & MASK_DBARE || (sim.out_pk & MASK_DELTA && sim.gr_flag == 0)))
 		{
-			projection_init(source);
+			//projection_init(source);
+			thrust::fill_n(thrust::device, source->data(), source->lattice().sitesLocalGross(), Real(0));
 			scalarProjectionCIC_project(pcls_cdm, source);
 			scalarProjectionCIC_comm(source);
 			plan_source->execute(FFT_FORWARD);
@@ -2911,7 +2920,8 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 						}
 					}
 				}
-				projection_init(source);
+				//projection_init(source);
+				thrust::fill_n(thrust::device, source->data(), source->lattice().sitesLocalGross(), Real(0));
 				scalarProjectionCIC_project(pcls_b, source);
 				scalarProjectionCIC_comm(source);
 				plan_source->execute(FFT_FORWARD);
@@ -2928,7 +2938,8 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 			Omega_ncdm = 0.;
 			for (int i = 0; i < cosmo.num_ncdm; i++)
 			{
-				projection_init(source);
+				//projection_init(source);
+				thrust::fill_n(thrust::device, source->data(), source->lattice().sitesLocalGross(), Real(0));
 				if (sim.numpcl[1+sim.baryon_flag+i] > 0)
 					scalarProjectionCIC_project(pcls_ncdm+i, source);
 				scalarProjectionCIC_comm(source);
@@ -3010,23 +3021,29 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 	
 	if (sim.out_pk & MASK_PHI)
 	{
+		nvtxRangePushA("writeSpectra:phi");
 		plan_phi->execute(FFT_FORWARD);
 		extractPowerSpectrum(*scalarFT, kbin, power, kscatter, pscatter, occupation, sim.numbins, false, KTYPE_LINEAR);
 		sprintf(filename, "%s%s%03d_phi.dat", sim.output_path, sim.basename_pk, pkcount);
 		writePowerSpectrum(kbin, power, kscatter, pscatter, occupation, sim.numbins, sim.boxsize, (Real) numpts3d * (Real) numpts3d * 2. * M_PI * M_PI, filename, "power spectrum of phi", a, sim.z_pk[pkcount]);
+		nvtxRangePop();
 	}
 			
 	if (sim.out_pk & MASK_CHI)
 	{
+		nvtxRangePushA("writeSpectra:chi");
 		plan_chi->execute(FFT_FORWARD);
 		extractPowerSpectrum(*scalarFT, kbin, power, kscatter, pscatter, occupation, sim.numbins, false, KTYPE_LINEAR);
 		sprintf(filename, "%s%s%03d_chi.dat", sim.output_path, sim.basename_pk, pkcount);
 		writePowerSpectrum(kbin, power, kscatter, pscatter, occupation, sim.numbins, sim.boxsize, (Real) numpts3d * (Real) numpts3d * 2. * M_PI * M_PI, filename, "power spectrum of chi", a, sim.z_pk[pkcount]);
+		nvtxRangePop();
 	}
 			
 	if (sim.out_pk & MASK_HIJ)
 	{
-		projection_init(Sij);
+		nvtxRangePushA("writeSpectra:hij");
+		//projection_init(Sij);
+		thrust::fill_n(thrust::device, Sij->data(), 6*Sij->lattice().sitesLocalGross(), Real(0));
 		projection_Tij_project(pcls_cdm, Sij, a, phi);
 		if (sim.baryon_flag)
 			projection_Tij_project(pcls_b, Sij, a, phi);
@@ -3054,11 +3071,14 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 		sprintf(filename, "%s%s%03d_hij_prime.dat", sim.output_path, sim.basename_pk, pkcount);
 		writePowerSpectrum(kbin, power, kscatter, pscatter, occupation, sim.numbins, sim.boxsize, 2. * M_PI * M_PI * Hconf(a, fourpiG, cosmo) * Hconf(a, fourpiG, cosmo), filename, "power spectrum of hij' / Hconf", a, sim.z_pk[pkcount]);
 #endif
+		nvtxRangePop();
 	}
 			
 	if ((sim.out_pk & MASK_T00 || sim.out_pk & MASK_DELTA) && sim.gr_flag > 0)
 	{
-		projection_init(source);
+		nvtxRangePushA("writeSpectra:T00");
+		//projection_init(source);
+		thrust::fill_n(thrust::device, source->data(), source->lattice().sitesLocalGross(), Real(0));
 #ifdef HAVE_CLASS
 		if (sim.radiation_flag > 0 || sim.fluid_flag > 0)
 		{
@@ -3105,7 +3125,8 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 				
 		if (cosmo.num_ncdm > 0 || sim.baryon_flag || sim.radiation_flag > 0 || sim.fluid_flag > 0)
 		{
-			projection_init(source);
+			//projection_init(source);
+			thrust::fill_n(thrust::device, source->data(), source->lattice().sitesLocalGross(), Real(0));
 			projection_T00_project(pcls_cdm, source, a, phi);
 			projection_T00_comm(source);
 			plan_source->execute(FFT_FORWARD);
@@ -3145,7 +3166,8 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 						}
 					}
 				}
-				projection_init(source);
+				//projection_init(source);
+				thrust::fill_n(thrust::device, source->data(), source->lattice().sitesLocalGross(), Real(0));
 				projection_T00_project(pcls_b, source, a, phi);
 				projection_T00_comm(source);
 				plan_source->execute(FFT_FORWARD);
@@ -3169,7 +3191,8 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 			}
 			for (int i = 0; i < cosmo.num_ncdm; i++)
 			{
-				projection_init(source);
+				//projection_init(source);
+				thrust::fill_n(thrust::device, source->data(), source->lattice().sitesLocalGross(), Real(0));
 				if (sim.numpcl[1+sim.baryon_flag+i] > 0)
 					projection_T00_project(pcls_ncdm+i, source, a, phi);
 				projection_T00_comm(source);
@@ -3272,10 +3295,12 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 				}
 			}
 		}
+		nvtxRangePop();
 	}
 			
 	if (sim.out_pk & MASK_B)
 	{
+		nvtxRangePushA("writeSpectra:B");
 		extractPowerSpectrum(*BiFT, kbin, power, kscatter, pscatter, occupation, sim.numbins, false, KTYPE_LINEAR);
 		sprintf(filename, "%s%s%03d_B.dat", sim.output_path, sim.basename_pk, pkcount);
 		writePowerSpectrum(kbin, power, kscatter, pscatter, occupation, sim.numbins, sim.boxsize, a * a * a * a * sim.numpts * sim.numpts * 2. * M_PI * M_PI, filename, "power spectrum of B", a, sim.z_pk[pkcount]);
@@ -3283,7 +3308,8 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 #ifdef CHECK_B
 		if (sim.vector_flag == VECTOR_PARABOLIC)
 		{
-			projection_init(Bi_check);
+			//projection_init(Bi_check);
+			thrust::fill_n(thrust::device, Bi_check->data(), 3*Bi_check->lattice().sitesLocalGross(), Real(0));
 			projection_T0i_project(pcls_cdm, Bi_check, phi);
 			if (sim.baryon_flag)
 				projection_T0i_project(pcls_b, Bi_check, phi);
@@ -3300,11 +3326,13 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 		sprintf(filename, "%s%s%03d_B_check.dat", sim.output_path, sim.basename_pk, pkcount);
 		writePowerSpectrum(kbin, power, kscatter, pscatter, occupation, sim.numbins, sim.boxsize, a * a * a * a * sim.numpts * sim.numpts * 2. * M_PI * M_PI, filename, "power spectrum of B", a, sim.z_pk[pkcount]);
 #endif
+		nvtxRangePop();
 	}
 	
 #ifdef VELOCITY
 	if (sim.out_pk & MASK_VEL)
 	{
+		nvtxRangePushA("writeSpectra:vel");
 		plan_vi->execute(FFT_FORWARD);
 		extractPowerSpectrum(*viFT, kbin, power, kscatter, pscatter, occupation, sim.numbins, false, KTYPE_LINEAR);
 		sprintf(filename, "%s%s%03d_v.dat", sim.output_path, sim.basename_pk, pkcount);
@@ -3319,6 +3347,7 @@ perfParticles_gevolution<part_simple,part_simple_info> * pcls_cdm, perfParticles
 		extractPowerSpectrum(*viFT, kbin, power, kscatter, pscatter, occupation, sim.numbins, false, KTYPE_LINEAR);
 		sprintf(filename, "%s%s%03d_omega.dat", sim.output_path, sim.basename_pk, pkcount);
 		writePowerSpectrum(kbin, power, kscatter, pscatter, occupation, sim.numbins, sim.boxsize, (Real) numpts3d * (Real) numpts3d * 2. * M_PI * M_PI * sim.boxsize * sim.boxsize / cosmo.h / cosmo.h, filename, "power spectrum of omega (curl v)", a, sim.z_pk[pkcount]);
+		nvtxRangePop();
 	}
 #endif
 

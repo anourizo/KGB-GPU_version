@@ -186,14 +186,16 @@ void extractCrossSpectrum(Field<Cplx> & fld1FT, Field<Cplx> & fld2FT, Real * kbi
 				bin = (int) floor((double) ((Real) numbins * sqrt(k2 / k2max)));
 				if (bin < numbins) 
 				{
-					#pragma omp critical
-					{
-						kbin[bin] += weight * sqrt(k2);
-						kscatter[bin] += weight * k2;
-						power[bin] += weight * p.real() * k2 * sqrt(k2) / s;
-						pscatter[bin] += weight * p.real() * p.real() * k2 * k2 * k2 / s / s;
-						occupation[bin] += weight;
-					}
+					#pragma omp atomic
+					kbin[bin] += weight * sqrt(k2);
+					#pragma omp atomic			
+					kscatter[bin] += weight * k2;
+					#pragma omp atomic
+					power[bin] += weight * p.real() * k2 * sqrt(k2) / s;
+					#pragma omp atomic
+					pscatter[bin] += weight * p.real() * p.real() * k2 * k2 * k2 / s / s;
+					#pragma omp atomic
+					occupation[bin] += weight;
 				}
 
 				k.next();

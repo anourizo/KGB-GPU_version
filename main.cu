@@ -689,35 +689,7 @@ int main(int argc, char **argv)
 	if (dtau_old < 0.)
 		dtau_old = 0.;
 
-	// Consistency check of the power spectra at z = 100 -- should be removed later
-
-
-
-COUT << COLORTEXT_CYAN << " writing power spectra before the main loop" << COLORTEXT_RESET << " at z = " << ((1./a) - 1.) <<  " (cycle " << cycle << "), tau/boxsize = " << tau << endl;
-
-			writeSpectra(sim, cosmo, fourpiG, a, pkcount,
-#ifdef HAVE_CLASS
-				class_background, class_perturbs, ic,
-#endif
-#ifdef HAVE_HICLASS_BG
-				cosmo.H_spline, cosmo.acc_H_s, gsl_spline_eval(cosmo.rho_smg_spline, a, cosmo.acc_rho_smg), gsl_spline_eval(cosmo.rho_crit_spline, 1., cosmo.acc_rho_crit),
-#endif
-				&pcls_cdm, &pcls_b, pcls_ncdm, &phi, &pi_k, &zeta_half, &chi, &Bi, &T00_kgb, &T0i_kgb, &Tij_kgb, &source, &Sij, zetaFT, &scalarFT, &scalarFT_pi, &scalarFT_zeta_half, &BiFT, &T00_kgbFT, &T0i_kgbFT, &Tij_kgbFT, &SijFT, &plan_phi, &plan_pi_k , &plan_zeta_half, &plan_chi, &plan_Bi, &plan_T00_kgb, &plan_T0i_kgb, &plan_Tij_kgb , &plan_source, &plan_Sij
-#ifdef CHECK_B
-				, &Bi_check, &BiFT_check, &plan_Bi_check
-#endif
-#ifdef VELOCITY
-				, &vi, &viFT, &plan_vi
-#endif
-#ifdef TENSOR_EVOLUTION
-				, &hijFT, &hijprimeFT
-#endif
-			);
-		
-
-
-
-	while (false)    // main loop
+	while (true)    // main loop
 	{
    old_fields_update(phi, phi_old, chi, chi_old);
 	/*for (x.first(); x.test(); x.next())

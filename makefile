@@ -9,6 +9,7 @@ HEALPIX_DIR  := $(HOME)/software/Healpix_3.83
 
 INCLUDE      += -I$(CFITSIO_DIR)/include -I$(HEALPIX_DIR)/include -I$(HEALPIX_DIR)/include/healpix_cxx
 LIB          += -L$(CFITSIO_DIR)/lib -L$(HEALPIX_DIR)/lib -lcfitsio -lchealpix
+
 HPXCXXLIB    := -lhealpix_cxx -lcfitsio  
 
 # target and source
@@ -59,6 +60,7 @@ run: $(EXEC)
 	rsync -av ./$(EXEC) /capstor/scratch/cscs/anourizo/testing/.
 	export OMP_NUM_THREADS=72
 	export OMP_PLACES=cores
+	LD_LIBRARY_PATH=$(HOME)/software/cfitsio/lib:$(HOME)/software/Healpix_3.83/lib:$$LD_LIBRARY_PATH \
 	srun -N 1 -n 4 --cpus-per-task=72 -C gpu -A sm97 --time=2:00 --partition=debug --hint=exclusive --cpu-bind=socket ./gpu-bind.sh /capstor/scratch/cscs/anourizo/testing/$(EXEC) -n 2 -m 2 -s /capstor/scratch/cscs/anourizo/testing/test.ini 
 
 

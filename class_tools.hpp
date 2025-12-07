@@ -15,16 +15,15 @@
 
 #ifdef HAVE_CLASS
 
-#define thermo thermodynamics
-#define perturbs perturbations
-#define nonlinear fourier
-#define transfers transfer
-#define spectra harmonic
-#define perturb_init perturbations_init
-#define perturb_free perturbations_free
-#define perturb_output_titles perturbations_output_titles
-#define perturb_output_data perturbations_output_data_at_z
-
+//#define thermo thermodynamics
+//#define perturbs perturbations
+//#define nonlinear fourier
+//#define transfers transfer
+//#define spectra harmonic
+//#define perturb_init perturbations_init
+//#define perturb_free perturbations_free
+//#define perturb_output_titles perturbations_output_titles
+//#define perturb_output_data perturbations_output_data_at_z
 #include <gsl/gsl_spline.h>
 #include "parser.hpp"
 
@@ -60,7 +59,7 @@ void initializeCLASSstructures(metadata & sim, icsettings & ic, cosmology & cosm
 	nonlinear class_nonlinear;
 	spectra class_spectra;
   	lensing class_lensing;
-	distortions class_distortions;
+	//distortions class_distortions;
   	output class_output;
 	file_content class_filecontent;
 	ErrorMsg class_errmsg;
@@ -70,7 +69,9 @@ void initializeCLASSstructures(metadata & sim, icsettings & ic, cosmology & cosm
 	double perturb_sampling_stepsize;
 	int recfast_Nz0;
 	int i;
-	int num_entries = 22;
+	//int num_entries = 22;
+	int num_entries = 30; // increased to 30 to accommodate more parameters
+
 #ifdef CLASS_K_PER_DECADE_FOR_PK
 	int k_per_decade_for_pk;
 	if (numparam == 0 || !parseParameter(params, numparam, "k_per_decade_for_pk", k_per_decade_for_pk))
@@ -155,26 +156,119 @@ void initializeCLASSstructures(metadata & sim, icsettings & ic, cosmology & cosm
 	sprintf(class_filecontent.name[i], "Omega_ur");
 	sprintf(class_filecontent.value[i++], "%e", cosmo.Omega_ur);
 
-	sprintf(class_filecontent.name[i], "Omega_fld");
-	sprintf(class_filecontent.value[i++], "%e", cosmo.Omega_fld);
+	//sprintf(class_filecontent.name[i], "Omega_fld");
+	//sprintf(class_filecontent.value[i++], "%e", cosmo.Omega_fld);
 
-	sprintf(class_filecontent.name[i], "w0_fld");
-	sprintf(class_filecontent.value[i++], "%g", cosmo.w0_fld);
+	//sprintf(class_filecontent.name[i], "w0_fld");
+	//sprintf(class_filecontent.value[i++], "%g", cosmo.w0_fld);
 
-	sprintf(class_filecontent.name[i], "wa_fld");
-	sprintf(class_filecontent.value[i++], "%g", cosmo.wa_fld);
+	//sprintf(class_filecontent.name[i], "wa_fld");
+	//sprintf(class_filecontent.value[i++], "%g", cosmo.wa_fld);
 
-	sprintf(class_filecontent.name[i], "cs2_fld");
-	sprintf(class_filecontent.value[i++], "%g", cosmo.cs2_fld);
+	//sprintf(class_filecontent.name[i], "cs2_fld");
+	//sprintf(class_filecontent.value[i++], "%g", cosmo.cs2_fld);
 
-	if (cosmo.Omega_smg < 0.)
+	/*if (cosmo.Omega_smg < 0.)
 	{
 		sprintf(class_filecontent.name[i], "Omega_Lambda");
 		sprintf(class_filecontent.value[i++], "%g", cosmo.Omega_Lambda);
 	}
+	*/
+
 	
+	// Ahmad added these
+
+	sprintf(class_filecontent.name[i], "write parameters");
+  	sprintf(class_filecontent.value[i++], "yeap");
+
+  	sprintf(class_filecontent.name[i], "write background");
+  	sprintf(class_filecontent.value[i++], "yeap");
+
+  	sprintf(class_filecontent.name[i], "format");
+  	sprintf(class_filecontent.value[i++], "class");
+
+  	sprintf(class_filecontent.name[i], "headers");
+  	sprintf(class_filecontent.value[i++], "yeap");
+
+
 	sprintf(class_filecontent.name[i], "Omega_smg");
-	sprintf(class_filecontent.value[i++], "%g", cosmo.Omega_smg);
+  	sprintf(class_filecontent.value[i++], "%d", -1);
+
+	sprintf(class_filecontent.name[i], "Omega_fld");
+	sprintf(class_filecontent.value[i++], "%e", 0.);
+
+	sprintf(class_filecontent.name[i], "Omega_Lambda");
+	sprintf(class_filecontent.value[i++], "%g", cosmo.Omega_Lambda);
+
+	 #ifdef HAVE_HICLASS_BG
+  		if (cosmo.gravity_model==0)
+  		{
+    	sprintf(class_filecontent.name[i], "gravity_model");
+    	sprintf(class_filecontent.value[i++], "propto_omega");
+
+    	sprintf(class_filecontent.name[i], "expansion_model");
+    	sprintf(class_filecontent.value[i++], "wowa");
+
+    	sprintf(class_filecontent.name[i], "expansion_smg");
+    	sprintf(class_filecontent.value[i++],"%e, %e, %e",cosmo.Omega_kgb, cosmo.w_kgb, cosmo.w_a_kgb);
+
+    	sprintf(class_filecontent.name[i], "parameters_smg");
+    	sprintf(class_filecontent.value[i++],"%e, %e, %e, %e, %e", cosmo.x_k, cosmo.x_b, cosmo.x_m, cosmo.x_t, cosmo.M_star_ini);
+  		}
+  		else if (cosmo.gravity_model==1)
+  		{
+    	sprintf(class_filecontent.name[i], "gravity_model");
+    	sprintf(class_filecontent.value[i++], "propto_scale");
+
+    	sprintf(class_filecontent.name[i], "expansion_model");
+    	sprintf(class_filecontent.value[i++], "wowa");
+    	sprintf(class_filecontent.name[i], "expansion_smg");
+    	sprintf(class_filecontent.value[i++],"%e, %e, %e",cosmo.Omega_kgb, cosmo.w_kgb, cosmo.w_a_kgb);
+
+    	sprintf(class_filecontent.name[i], "parameters_smg");
+    	sprintf(class_filecontent.value[i++],"%e, %e, %e, %e, %e", cosmo.x_k, cosmo.x_b, cosmo.x_m, cosmo.x_t, cosmo.M_star_ini);
+  		}
+  		else if (cosmo.gravity_model==2)
+  		{
+    	sprintf(class_filecontent.name[i], "gravity_model");
+    	sprintf(class_filecontent.value[i++], "constant_alphas");
+
+    	sprintf(class_filecontent.name[i], "expansion_model");
+    	sprintf(class_filecontent.value[i++], "wowa");
+
+    	sprintf(class_filecontent.name[i], "expansion_smg");
+    	sprintf(class_filecontent.value[i++],"%e, %e, %e",cosmo.Omega_kgb, cosmo.w_kgb, cosmo.w_a_kgb);
+
+    	sprintf(class_filecontent.name[i], "parameters_smg");
+    	sprintf(class_filecontent.value[i++],"%e, %e, %e, %e, %e", cosmo.x_k, cosmo.x_b, cosmo.x_m, cosmo.x_t, cosmo.M_star_ini);
+  		}
+  		else if (cosmo.gravity_model==3)
+  		{
+    	sprintf(class_filecontent.name[i], "gravity_model");
+    	sprintf(class_filecontent.value[i++], "k_essence_power");
+
+    	sprintf(class_filecontent.name[i], "parameters_smg");
+    	sprintf(class_filecontent.value[i++],"%e, %e, %e, %e, %e, %e",cosmo.Xt, cosmo.g0, cosmo.g2, cosmo.g4, cosmo.phi_i, cosmo.X_i);
+  		}
+     #else
+  		sprintf(class_filecontent.name[i], "gravity_model");
+  		sprintf(class_filecontent.value[i++], "propto_omega");
+
+  		sprintf(class_filecontent.name[i], "expansion_model");
+  		sprintf(class_filecontent.value[i++], "wowa");
+
+  		sprintf(class_filecontent.name[i], "expansion_smg");
+  		sprintf(class_filecontent.value[i++],"%e, %e, %e",cosmo.Omega_kgb, cosmo.w_kgb, 0.0);
+
+  		sprintf(class_filecontent.name[i], "parameters_smg");
+  		sprintf(class_filecontent.value[i++],"%e, %e, %e, %e, %e", cosmo.x_k, cosmo.x_b, cosmo.x_m, cosmo.x_t, cosmo.M_star_ini);
+  	 #endif
+
+
+	// Ahmad end
+	
+	//sprintf(class_filecontent.name[i], "Omega_smg");
+	//sprintf(class_filecontent.value[i++], "%g", cosmo.Omega_smg);
 
 	sprintf(class_filecontent.name[i], "N_ncdm");
 	sprintf(class_filecontent.value[i++], "%d", cosmo.num_ncdm);
@@ -263,13 +357,18 @@ void initializeCLASSstructures(metadata & sim, icsettings & ic, cosmology & cosm
 		}
 	}
 
+	/*for (int j = 0; j < num_entries; j++)
+		{COUT << class_filecontent.name[j] << " = " << class_filecontent.value[j] << endl;
+		}*/
+
 	COUT << " gevolution is calling CLASS..." << endl << endl;
 
-	if (input_read_from_file(&class_filecontent, &class_precision, &class_background, &class_thermo, &class_perturbs, &class_transfers, &class_primordial, &class_spectra, &class_nonlinear, &class_lensing, &class_distortions, &class_output, class_errmsg) == _FAILURE_)
+	if (input_init(&class_filecontent, &class_precision, &class_background, &class_thermo, &class_perturbs, &class_transfers, &class_primordial, &class_spectra, &class_nonlinear, &class_lensing, &class_output, class_errmsg) == _FAILURE_)
 	{
 		COUT << " error: calling input_init from CLASS library failed!" << endl << " following error message was passed: " << class_errmsg << endl;
 		parallel.abortForce();
 	}
+
 
 	parser_free(&class_filecontent);
 

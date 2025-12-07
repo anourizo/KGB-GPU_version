@@ -75,6 +75,7 @@ using namespace LATfield2;
 
 int main(int argc, char **argv)
 {
+	double a_kgb;	
 #ifdef BENCHMARK
 	//benchmarking variables
 	double ref_time, ref2_time, cycle_start_time;
@@ -91,7 +92,8 @@ int main(int argc, char **argv)
 	double update_q_time = 0;
 	int update_q_count = 0;
 	double moveParts_time = 0;
-	int  moveParts_count = 0;	
+	double kgb_update_time=0; 
+	int  moveParts_count = 0;
 #endif  //BENCHMARK
 	
 	int n = 0, m = 0;
@@ -117,6 +119,33 @@ int main(int argc, char **argv)
 	icsettings ic;
 	double T00hom = 0.;
 	Real phi_hom;
+
+// Ahmad added these lines
+	/*#ifdef HAVE_HICLASS_BG
+		gsl_interp_accel * acc = gsl_interp_accel_alloc();
+		gsl_spline * H_spline = NULL;
+		gsl_spline * H_prime_spline = NULL;
+		gsl_spline * H_prime_prime_spline = NULL;
+		gsl_spline * rho_cdm_spline = NULL;
+		gsl_spline * rho_b_spline = NULL;
+		gsl_spline * rho_g_spline = NULL;
+		gsl_spline * rho_crit_spline = NULL;
+		gsl_spline * rho_ur_spline = NULL;
+		gsl_spline * cs2_spline = NULL;
+		gsl_spline * cs2_prime_spline = NULL;
+		gsl_spline * rho_smg_spline = NULL;
+		gsl_spline * rho_smg_prime_spline = NULL;
+		gsl_spline * p_smg_spline = NULL;
+		gsl_spline * p_smg_prime_spline = NULL;
+		gsl_spline * alpha_K_spline = NULL;
+		gsl_spline * alpha_K_prime_spline = NULL;
+  		gsl_spline * alpha_B_spline = NULL;
+  		gsl_spline * alpha_B_prime_spline = NULL;
+		gsl_spline * cs2num_spline = NULL;
+		gsl_spline * kin_D_spline = NULL;
+		gsl_spline * lambda_2_spline = NULL;
+	#endif*/
+// Ahmad end
 
 #ifdef ANISOTROPIC_EXPANSION
 	Real hij_hom[5] = {0.,0.,0.,0.,0.}; // hij_hom = {h_00, h_01, h_02, h_11, h_12} - only the symmetric part of the tensor is stored, h_33 = -h_00-h_11 due to the tracelessness condition
@@ -178,11 +207,29 @@ int main(int argc, char **argv)
 	else
 	{
 #endif
+
+	COUT << COLORTEXT_CYAN << endl;
+	COUT << "                                                      "<<endl;
+	COUT <<COLORTEXT_LIGHT_BROWN<<"KKKKKKKKK    KKKKKKK             GGGGGGGGGGGGG     BBBBBBBBBBBBBBBBB" <<COLORTEXT_CYAN  <<endl; 
+	COUT <<"K:::::::K    K:::::K          GGG::::::::::::G     B::::::::::::::::B"  <<endl;
+	COUT << "K:::::::K    K:::::K        GG:::::::::::::::G     B::::::BBBBBB:::::B"  <<endl;
+	COUT <<"K:::::::K   K::::::K       G:::::GGGGGGGG::::G     BB:::::B     B:::::B"<<endl;
+	COUT <<"KK::::::K  K:::::KKK      G:::::G       GGGGGG     B:::::B     B:::::B"<<endl;
+	COUT <<"K:::::K K:::::K        G:::::G                     B::::B     B:::::B"  <<endl;
+	COUT <<"K::::::K:::::K         G:::::G                     B::::BBBBBB:::::B"   <<endl;
+	COUT <<"K:::::::::::K          G:::::G      GGGGGGGGGG     B:::::::::::::BB"  <<COLORTEXT_RESET <<" - evolution" << COLORTEXT_CYAN <<endl; 
+	COUT <<"K:::::::::::K          G:::::G      G::::::::G     B::::BBBBBB:::::B"   <<endl;
+	COUT <<"K::::::K:::::K         G:::::G      GGGGG::::G     B::::B     B:::::B"  <<endl;
+	COUT <<"K:::::K K:::::K        G:::::G          G::::G     B::::B     B:::::B"  << COLORTEXT_CYAN << endl;
+	COUT <<"KK::::::K  K:::::KKK      G:::::G       G::::G     B:::::B     B:::::B"<<endl;
+	COUT <<"K:::::::K   K::::::K       G:::::GGGGGGGG::::G     BB:::::BBBBBB::::::B"<<endl;
+	COUT <<"K:::::::K    K:::::K        GG:::::::::::::::G     B:::::::::::::::::B" <<endl;
+	COUT <<"K:::::::K    K:::::K          GGG::::::GGG:::G     B::::::::::::::::B"  <<endl;
+	COUT <<COLORTEXT_LIGHT_BROWN<<"KKKKKKKKK    KKKKKKK            GGGGGGGGGGGGGG     BBBBBBBBBBBBBBBBB"   <<endl;
+	COUT <<COLORTEXT_RESET << endl;
+
+	COUT << " version 2.0 alpha    running on " << n*m << " tasks with " << omp_get_max_threads() << " OpenMP threads per task." << endl;
 	
-	COUT << COLORTEXT_WHITE << endl;	
-	COUT << "  _   _      _         __ ,  _" << endl;
-	COUT << " (_| (-' \\/ (_) (_ (_| (  ( (_) /\\/	version 2.0 alpha    running on " << n*m << " tasks with " << omp_get_max_threads() << " OpenMP threads per task." << endl;
-	COUT << "  -'" << endl << COLORTEXT_RESET << endl;
 
 	int deviceCount;
 	cudaGetDeviceCount(&deviceCount);
@@ -239,6 +286,36 @@ int main(int argc, char **argv)
 	else
 #endif
 		numparam = 0;
+
+
+	// Ahmad added these lines
+
+/*#ifdef HAVE_HICLASS_BG
+	initializeCLASSstructures(sim, ic, cosmo, class_background, class_perturbs, params, numparam);
+	loadBGFunctions(class_background, H_spline, "H [1/Mpc]", sim.z_in);
+	loadBGFunctions(class_background, H_prime_spline, "H_prime", sim.z_in);
+  	loadBGFunctions(class_background, H_prime_prime_spline, "H_prime_prime", sim.z_in);
+	loadBGFunctions(class_background, rho_cdm_spline, "(.)rho_cdm", sim.z_in);
+	loadBGFunctions(class_background, rho_b_spline, "(.)rho_b", sim.z_in);
+	loadBGFunctions(class_background, rho_g_spline, "(.)rho_g", sim.z_in);
+	loadBGFunctions(class_background, rho_crit_spline, "(.)rho_crit", sim.z_in);
+	loadBGFunctions(class_background, rho_ur_spline, "(.)rho_ur", sim.z_in);
+	loadBGFunctions(class_background, cs2_spline, "c_s^2", sim.z_in);
+	loadBGFunctions(class_background, cs2_prime_spline, "c_s^2_prime", sim.z_in);
+	loadBGFunctions(class_background, rho_smg_spline, "(.)rho_smg", sim.z_in);
+	loadBGFunctions(class_background, rho_smg_prime_spline, "(.)rho_smg_prime", sim.z_in);
+	loadBGFunctions(class_background, p_smg_spline, "(.)p_smg", sim.z_in);
+	loadBGFunctions(class_background, p_smg_prime_spline, "(.)p_smg_prime", sim.z_in);
+	loadBGFunctions(class_background, alpha_K_spline, "kineticity_smg", sim.z_in);
+	loadBGFunctions(class_background, alpha_K_prime_spline, "kineticity_prime_smg", sim.z_in);
+	loadBGFunctions(class_background, alpha_B_spline, "braiding_smg", sim.z_in);
+	loadBGFunctions(class_background, alpha_B_prime_spline, "braiding_prime_smg", sim.z_in);
+	loadBGFunctions(class_background, cs2num_spline, "cs2num", sim.z_in);
+	loadBGFunctions(class_background, kin_D_spline, "kin (D)", sim.z_in);
+	loadBGFunctions(class_background, lambda_2_spline, "lambda_2", sim.z_in);
+#endif */
+
+	// Ahmad end 
 	
 	h5filename.reserve(2*PARAM_MAX_LENGTH);
 	h5filename.assign(sim.output_path);
@@ -290,6 +367,79 @@ int main(int argc, char **argv)
 	Bi.initialize(lat,3);
 	BiFT.initialize(latFT,3);
 	PlanFFT<Cplx> plan_Bi(&Bi, &BiFT);
+
+	// KGB
+	//FIXME: check if all these fields are necessary!
+	Field<Real> phi_old;
+	Field<Cplx> scalarFT_phi_old;
+	phi_old.initialize(lat,1);
+	scalarFT_phi_old.initialize(latFT,1);
+	PlanFFT<Cplx> plan_phi_old(&phi_old, &scalarFT_phi_old);
+	
+	Field<Real> zeta_half;
+	Field<Cplx> scalarFT_zeta_half;
+	zeta_half.initialize(lat,1);
+	scalarFT_zeta_half.initialize(latFT,1);
+	PlanFFT<Cplx> plan_zeta_half(&zeta_half, &scalarFT_zeta_half);
+  
+	Field<Real> chi_old;
+	Field<Cplx> scalarFT_chi_old;
+	chi_old.initialize(lat,1);
+	scalarFT_chi_old.initialize(latFT,1);
+	PlanFFT<Cplx> plan_chi_old(&chi_old, &scalarFT_chi_old);
+
+
+	Field<Real> phi_prime;
+	Field<Cplx> phi_prime_scalarFT;
+	phi_prime.initialize(lat,1);
+	phi_prime_scalarFT.initialize(latFT,1);
+	PlanFFT<Cplx> phi_prime_plan(&phi_prime, &phi_prime_scalarFT);
+
+
+	Field<Real> psi_prime;
+	Field<Cplx> psi_prime_scalarFT;
+	psi_prime.initialize(lat,1);
+	psi_prime_scalarFT.initialize(latFT,1);
+	PlanFFT<Cplx> psi_prime_plan(&psi_prime, &psi_prime_scalarFT);
+
+	Field<Real> psi_half;
+	Field<Cplx> psi_half_scalarFT;
+	psi_half.initialize(lat,1);
+	psi_half_scalarFT.initialize(latFT,1);
+	PlanFFT<Cplx> psi_half_plan(&psi_half, &psi_half_scalarFT);
+
+
+	Field<Real> pi_k;
+	Field<Cplx> scalarFT_pi;
+	pi_k.initialize(lat,1);
+	scalarFT_pi.initialize(latFT,1);
+	PlanFFT<Cplx> plan_pi_k(&pi_k, &scalarFT_pi);
+
+	Field<Real> T00_kgb;
+	Field<Cplx> T00_kgbFT;
+	T00_kgb.initialize(lat,1);
+	T00_kgbFT.initialize(latFT,1);
+	PlanFFT<Cplx> plan_T00_kgb(&T00_kgb, &T00_kgbFT);
+
+	Field<Real> T0i_kgb;
+	Field<Cplx> T0i_kgbFT;
+	T0i_kgb.initialize(lat,3);
+	T0i_kgbFT.initialize(latFT,3);
+	PlanFFT<Cplx> plan_T0i_kgb(&T0i_kgb, &T0i_kgbFT);
+
+	Field<Real> Tij_kgb;
+	Field<Cplx> Tij_kgbFT;
+	Tij_kgb.initialize(lat,3,3,symmetric);
+	Tij_kgbFT.initialize(latFT,3,3,symmetric);
+	PlanFFT<Cplx> plan_Tij_kgb(&Tij_kgb, &Tij_kgbFT);	
+
+
+	Field<Real> deltaPm;
+	Field<Cplx> scalarFT_deltaPm;
+	deltaPm.initialize(lat,1);
+	scalarFT_deltaPm.initialize(latFT,1);
+	PlanFFT<Cplx> plan_deltaPm(&deltaPm, &scalarFT_deltaPm);
+
 #ifdef CHECK_B
 	Field<Real> Bi_check;
 	Field<Cplx> BiFT_check;
@@ -354,7 +504,7 @@ int main(int argc, char **argv)
 	nvtxRangePushA("IC generation");
 	
 	if (ic.generator == ICGEN_BASIC)
-		generateIC_basic(sim, ic, cosmo, fourpiG, &pcls_cdm, &pcls_b, pcls_ncdm, maxvel, &phi, &chi, &Bi, &source, &Sij, &scalarFT, &BiFT, &SijFT, &plan_phi, &plan_chi, &plan_Bi, &plan_source, &plan_Sij, 
+		generateIC_basic(sim, ic, cosmo, fourpiG, &pcls_cdm, &pcls_b, pcls_ncdm, maxvel, &phi, &pi_k, &zeta_half, &chi, &Bi, &source, &Sij, &scalarFT, &scalarFT_pi, &scalarFT_zeta_half, &BiFT, &SijFT, &plan_phi, &plan_pi_k, &plan_zeta_half, &plan_chi, &plan_Bi, &plan_source, &plan_Sij, 
 #ifdef HAVE_CLASS
 		class_background, class_perturbs,
 #endif		
@@ -444,7 +594,7 @@ int main(int argc, char **argv)
 			cosmo.acc_H = gsl_interp_accel_alloc();
 		}
 		else
-			cosmo2.Hspline = NULL;
+		cosmo2.Hspline = NULL;
 		loadBGFunctions(class_background, cosmo.tauspline, "conf. time [Mpc]", sim.z_in, cosmo.h/sim.boxsize);
 		cosmo.acc_tau = gsl_interp_accel_alloc();
 		COUT << "Initial Hubble rate = " << Hconf(a, fourpiG, cosmo2) << " (gevolution), " << Hconf(a, fourpiG, cosmo) << " (CLASS) -- using CLASS" << endl;
@@ -513,14 +663,16 @@ int main(int argc, char **argv)
 			chi.updateHalo();
 		}
 	}
-	else if (cosmo.Hspline != NULL)
+	/*else if (cosmo.Hspline != NULL)
 	{
 		gsl_spline_free(cosmo.Hspline);
 		gsl_interp_accel_free(cosmo.acc_H);
 		cosmo.Hspline = NULL;
 		freeCLASSstructures(class_background, class_perturbs);
-	}
+	}*/
+
 	if (numparam > 0) free(params);
+
 #endif
 
 	if (tau < 0.)
@@ -537,8 +689,43 @@ int main(int argc, char **argv)
 	if (dtau_old < 0.)
 		dtau_old = 0.;
 
-	while (true)    // main loop
+	// Consistency check of the power spectra at z = 100 -- should be removed later
+
+
+
+COUT << COLORTEXT_CYAN << " writing power spectra before the main loop" << COLORTEXT_RESET << " at z = " << ((1./a) - 1.) <<  " (cycle " << cycle << "), tau/boxsize = " << tau << endl;
+
+			writeSpectra(sim, cosmo, fourpiG, a, pkcount,
+#ifdef HAVE_CLASS
+				class_background, class_perturbs, ic,
+#endif
+#ifdef HAVE_HICLASS_BG
+				cosmo.H_spline, cosmo.acc_H_s, gsl_spline_eval(cosmo.rho_smg_spline, a, cosmo.acc_rho_smg), gsl_spline_eval(cosmo.rho_crit_spline, 1., cosmo.acc_rho_crit),
+#endif
+				&pcls_cdm, &pcls_b, pcls_ncdm, &phi, &pi_k, &zeta_half, &chi, &Bi, &T00_kgb, &T0i_kgb, &Tij_kgb, &source, &Sij, zetaFT, &scalarFT, &scalarFT_pi, &scalarFT_zeta_half, &BiFT, &T00_kgbFT, &T0i_kgbFT, &Tij_kgbFT, &SijFT, &plan_phi, &plan_pi_k , &plan_zeta_half, &plan_chi, &plan_Bi, &plan_T00_kgb, &plan_T0i_kgb, &plan_Tij_kgb , &plan_source, &plan_Sij
+#ifdef CHECK_B
+				, &Bi_check, &BiFT_check, &plan_Bi_check
+#endif
+#ifdef VELOCITY
+				, &vi, &viFT, &plan_vi
+#endif
+#ifdef TENSOR_EVOLUTION
+				, &hijFT, &hijprimeFT
+#endif
+			);
+		
+
+
+
+	while (false)    // main loop
 	{
+   old_fields_update(phi, phi_old, chi, chi_old);
+	/*for (x.first(); x.test(); x.next())
+		{
+		phi_old(x) = phi(x);
+		chi_old(x) = chi(x);
+		}*/
+
 #ifdef BENCHMARK		
 		cycle_start_time = MPI_Wtime();
 #endif
@@ -593,35 +780,11 @@ int main(int argc, char **argv)
 		}
 		projection_T00_comm(&source);
 		nvtxRangePop();
-		
-#ifdef VELOCITY
-		if ((sim.out_pk & MASK_VEL) || (sim.out_snapshot & MASK_VEL))
-		{
-			//projection_init(&Bi);
-			thrust::fill_n(thrust::device, Bi.data(), 3*lat.sitesLocalGross(), Real(0));
-            projection_Ti0_project(&pcls_cdm, &Bi, &phi, &chi);
-            vertexProjectionCIC_comm(&Bi);
-            compute_vi_rescaled(cosmo, &vi, &source, &Bi, a, a_old);
-            a_old = a;
-		}
-#endif
-		
+
 		nvtxRangePushA("Zero Tij");
 		//projection_init(&Sij);
 		thrust::fill_n(thrust::device, Sij.data(), 6*lat.sitesLocalGross(), Real(0));
 		nvtxRangePop();
-
-/*#ifdef ANISOTROPIC_EXPANSION
-		projection_Tij_project(&pcls_cdm, &Sij, a, &phi, 1., hij_hom);
-#else
-		projection_Tij_project(&pcls_cdm, &Sij, a, &phi);
-#endif
-		if (sim.baryon_flag)
-#ifdef ANISOTROPIC_EXPANSION
-			projection_Tij_project(&pcls_b, &Sij, a, &phi, 1., hij_hom);
-#else
-			projection_Tij_project(&pcls_b, &Sij, a, &phi);
-#endif*/
 
 		if (a >= 1. / (sim.z_switch_linearchi + 1.))
 		{
@@ -639,6 +802,106 @@ int main(int argc, char **argv)
 				}
 			}
 		}
+
+		nvtxRangePushA("offload Tij projection to GPU");
+		f_params[0] = a;
+		f_params[1] = 1.;
+		projection_Tij_project_Async(&pcls_cdm, project_Tij_fields, 2, f_params);
+		if (sim.baryon_flag)
+			projection_Tij_project_Async(&pcls_b, project_Tij_fields, 2, f_params);
+		nvtxRangePop();
+
+		nvtxRangePushA("sync and finalize Tij projection");
+		auto success = cudaDeviceSynchronize();
+
+		if (success != cudaSuccess)
+		{
+			std::cerr << "CUDA kernel failed: " << cudaGetErrorString(success) << std::endl;
+        	throw std::runtime_error("Error in CUDA kernel called via projection_Tij_project_Async");
+		}
+
+		projection_Tij_comm(&Sij);
+		nvtxRangePop();
+
+
+		// KGB
+		if (sim.kgb_source_gravity==1)
+		{
+			nvtxRangePushA("Compute Tmunu for KGB");
+		#ifdef HAVE_HICLASS_BG 
+
+			if (sim.vector_flag == VECTOR_ELLIPTIC)
+			{
+				projection_Tmunu_kgb(T00_kgb, T0i_kgb, Tij_kgb, dx, a, fourpiG, gsl_spline_eval(cosmo.H_spline, 1., cosmo.acc_H_s), phi, chi, phi_prime, pi_k, zeta_half, deltaPm, source, 
+				Hconf(a, fourpiG, cosmo), Hconf_prime(a, fourpiG, cosmo), Hconf_prime_prime(a, fourpiG, cosmo),
+				gsl_spline_eval(cosmo.rho_smg_spline, a, cosmo.acc_rho_smg), gsl_spline_eval(cosmo.p_smg_spline, a, cosmo.acc_p_smg), gsl_spline_eval(cosmo.p_smg_prime_spline, a, cosmo.acc_p_smg_prime), gsl_spline_eval(cosmo.rho_crit_spline, 1., cosmo.acc_rho_crit),
+				gsl_spline_eval(cosmo.alpha_K_spline, a, cosmo.acc_alpha_K), gsl_spline_eval(cosmo.alpha_B_spline, a, cosmo.acc_alpha_B), gsl_spline_eval(cosmo.alpha_K_prime_spline, a, cosmo.acc_alpha_K_prime), 
+				gsl_spline_eval(cosmo.alpha_B_prime_spline, a, cosmo.acc_alpha_B_prime));
+			}
+			else
+			{
+				projection_Tmunu_kgb(T00_kgb, T0i_kgb, Tij_kgb, dx, a, fourpiG, gsl_spline_eval(cosmo.H_spline, 1., cosmo.acc_H_s), phi, chi, phi_prime, pi_k, zeta_half, deltaPm, source,
+				Hconf(a, fourpiG, cosmo), Hconf_prime(a, fourpiG, cosmo), Hconf_prime_prime(a, fourpiG, cosmo),
+				gsl_spline_eval(cosmo.rho_smg_spline, a, cosmo.acc_rho_smg), gsl_spline_eval(cosmo.p_smg_spline, a, cosmo.acc_p_smg), gsl_spline_eval(cosmo.p_smg_prime_spline, a, cosmo.acc_p_smg_prime), gsl_spline_eval(cosmo.rho_crit_spline, 1., cosmo.acc_rho_crit),
+				gsl_spline_eval(cosmo.alpha_K_spline, a, cosmo.acc_alpha_K), gsl_spline_eval(cosmo.alpha_B_spline, a, cosmo.acc_alpha_B), gsl_spline_eval(cosmo.alpha_K_prime_spline, a, cosmo.acc_alpha_K_prime), 
+				gsl_spline_eval(cosmo.alpha_B_prime_spline, a, cosmo.acc_alpha_B_prime));
+			}
+		#else // default KGB-evolution or CLASS // No hiclass BG used
+			if (sim.vector_flag == VECTOR_ELLIPTIC)
+			{
+				projection_Tmunu_kgb(T00_kgb, T0i_kgb, Tij_kgb, dx, a, phi, pi_k, zeta_half, cosmo.Omega_kgb * pow(a , -3. * cosmo.w_kgb) * (1. + cosmo.w_kgb) / (cosmo.cs2_kgb), cosmo.Omega_kgb * pow(a , -3. * cosmo.w_kgb) * (1. + cosmo.w_kgb), cosmo.w_kgb, cosmo.cs2_kgb, Hconf(a, fourpiG,cosmo), sim.NL_kgb, 1);
+			}
+			else
+			{
+				projection_Tmunu_kgb(T00_kgb, T0i_kgb, Tij_kgb, dx, a, phi, pi_k, zeta_half, cosmo.Omega_kgb * pow(a , -3. * cosmo.w_kgb) * (1. + cosmo.w_kgb) / (cosmo.cs2_kgb), cosmo.Omega_kgb * pow(a , -3. * cosmo.w_kgb) * (1. + cosmo.w_kgb), cosmo.w_kgb, cosmo.cs2_kgb, Hconf(a, fourpiG,cosmo), sim.NL_kgb, 0);
+			}
+		#endif
+
+			/*for (x.first(); x.test(); x.next())
+			{   // CHECK! the coeffs and etc!
+				// The coefficient is because it wanted to to be sourced according to eq C.2 of gevolution paper
+				// Note that it is multiplied to dx^2 and is divived by -a^3 because of definition of T00 which is scaled by a^3
+				// We have T00 and Tij according to code's units, but source is important to calculate potentials and moving particles.
+				// There is coefficient between Tij and Sij as source.
+				source(x) += T00_kgb(x);
+				if (sim.vector_flag == VECTOR_ELLIPTIC) for (int c=0;c<3;c++) Bi(x,c) += T0i_kgb(x,c);
+				for(int c=0;c<6;c++) Sij(x,c) += (2.) * Tij_kgb(x,c);
+			}*/
+
+			nvtxRangePop();
+		}
+		
+
+
+		
+		
+#ifdef VELOCITY
+		if ((sim.out_pk & MASK_VEL) || (sim.out_snapshot & MASK_VEL))
+		{
+			//projection_init(&Bi);
+			thrust::fill_n(thrust::device, Bi.data(), 3*lat.sitesLocalGross(), Real(0));
+            projection_Ti0_project(&pcls_cdm, &Bi, &phi, &chi);
+            vertexProjectionCIC_comm(&Bi);
+            compute_vi_rescaled(cosmo, &vi, &source, &Bi, a, a_old);
+            a_old = a;
+		}
+#endif
+		
+
+
+/*#ifdef ANISOTROPIC_EXPANSION
+		projection_Tij_project(&pcls_cdm, &Sij, a, &phi, 1., hij_hom);
+#else
+		projection_Tij_project(&pcls_cdm, &Sij, a, &phi);
+#endif
+		if (sim.baryon_flag)
+#ifdef ANISOTROPIC_EXPANSION
+			projection_Tij_project(&pcls_b, &Sij, a, &phi, 1., hij_hom);
+#else
+			projection_Tij_project(&pcls_b, &Sij, a, &phi);
+#endif*/
+
+
 		//projection_Tij_comm(&Sij);
 		
 #ifdef BENCHMARK 
@@ -677,13 +940,7 @@ int main(int argc, char **argv)
 #endif
 		}
 
-		nvtxRangePushA("offload Tij projection to GPU");
-		f_params[0] = a;
-		f_params[1] = 1.;
-		projection_Tij_project_Async(&pcls_cdm, project_Tij_fields, 2, f_params);
-		if (sim.baryon_flag)
-			projection_Tij_project_Async(&pcls_b, project_Tij_fields, 2, f_params);
-		nvtxRangePop();
+
 		
 		nvtxRangePushA("solveModifiedPoissonFT");
 		if (sim.gr_flag == 0)
@@ -696,18 +953,7 @@ int main(int argc, char **argv)
 		}
 		nvtxRangePop();
 
-		nvtxRangePushA("sync and finalize Tij projection");
-		auto success = cudaDeviceSynchronize();
-
-		if (success != cudaSuccess)
-		{
-			std::cerr << "CUDA kernel failed: " << cudaGetErrorString(success) << std::endl;
-        	throw std::runtime_error("Error in CUDA kernel called via projection_Tij_project_Async");
-		}
-
-		projection_Tij_comm(&Sij);
-		nvtxRangePop();
-
+	
 		if (sim.gr_flag == 0 || dtau_old > 0.)
 		{		
 #ifdef BENCHMARK
@@ -933,9 +1179,119 @@ int main(int argc, char **argv)
 					fprintf(outfile, "# background statistics\n# cycle   tau/boxsize    a             conformal H/H0  phi(k=0)       T00(k=0)       h00(k=0)       h01(k=0)       h02(k=0)       h11(k=0)       h12(k=0)\n");
 				fprintf(outfile, " %6d   %e   %e   %e   %e   %e   %e   %e   %e   %e   %e\n", cycle, tau, a, Hconf(a, fourpiG, cosmo) / Hconf(1., fourpiG, cosmo), phi_hom, T00hom, hij_hom[0], hij_hom[1], hij_hom[2], hij_hom[3], hij_hom[4]);
 #else
-				if (cycle == 0)
-					fprintf(outfile, "# background statistics\n# cycle   tau/boxsize    a             conformal H/H0  phi(k=0)       T00(k=0)\n");
-				fprintf(outfile, " %6d   %e   %e   %e   %e   %e\n", cycle, tau, a, Hconf(a, fourpiG, cosmo) / Hconf(1., fourpiG, cosmo), phi_hom, T00hom);
+				//if (cycle == 0)
+					//fprintf(outfile, "# background statistics\n# cycle   tau/boxsize    a             conformal H/H0  phi(k=0)       T00(k=0)\n");
+				//fprintf(outfile, " %6d   %e   %e   %e   %e   %e\n", cycle, tau, a, Hconf(a, fourpiG, cosmo) / Hconf(1., fourpiG, cosmo), phi_hom, T00hom);
+
+				//Ahmad added thee lines
+				
+    #ifdef HAVE_HICLASS_BG
+            if (cycle == 0)
+            {
+                // Write multi-line header with fixed-width fields
+                fprintf(outfile, "# background statistics\n");
+                fprintf(outfile, "# All the values except 'a' and 'T00' are computed in the hiclass.\n");
+                fprintf(outfile, "# The quantities rho_x, rho_x_prime are in unit of hiclass, T00 is in the k-evolution code's unit\n");		
+				fprintf(outfile, "# Constant values at end of file:\n");
+				fprintf(outfile, "# fourpiG   = %24e\n", fourpiG);
+				fprintf(outfile, "# H0[1/Mpc] = %24e\n", gsl_spline_eval(cosmo.H_spline, 1, cosmo.acc_H_s));
+                
+                // Header line with fixed-width fields (25 characters each)
+                fprintf(outfile, "\n# %-12s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s %-24s\n",
+                    "0:cycle",
+                    "1:tau/boxsize",
+                    "2:a",
+					"3:z",
+					"4:H [1/Mpc]",
+                    "5:Hconf",
+                    "6:Hconf_prime",
+                    "7:Hconf_prime_prime",
+					"8:rho_cdm",
+					"9:rho_b",
+					"10:rho_g",
+					"11:rho_ur",
+					"12:rho_crit",
+					"13:rho_smg",
+                    "14:p_smg",
+                    "15:rho_smg_prime",
+                    "16:p_smg_prime",
+                    "17:alpha_K",
+                    "18:alpha_B",
+                    "19:alpha_K_prime",
+                    "20:alpha_B_prime",
+                    "21:cs2",
+					"22:cs2num",
+					"23:kin (D)",
+					"24:phi(k=0)",
+					"25:T00_hom"
+                );
+            }
+    
+            // Define a format string with fixed-width fields for alignment (25 characters each)
+            // Left-align each field using the '-' flag
+            const char* format = " %-15d %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e %-24e\n";
+    
+            // Write the data with alignment
+            /*fprintf(outfile, format,
+                    cycle,                                                // 0:cycle (int)
+                    tau,                                                  // 1:tau/boxsize (double)
+                    a,                                                    // 2:a (double)
+					1./a-1.,                                              // 3:z
+                    gsl_spline_eval(H_spline, a, acc),                    // 4:H [1/Mpc]
+                    Hconf(a, fourpiG, cosmo),                             // 5:Hconf
+                    Hconf_prime(a, fourpiG, cosmo),                       // 6:Hconf_prime
+					Hconf_prime_prime(a, fourpiG, cosmo),                 // 7:Hconf_prime_prime
+                    gsl_spline_eval(rho_cdm_spline, a, acc),              // 8:rho_cdm
+                    gsl_spline_eval(rho_b_spline, a, acc),                // 9:rho_b
+                    gsl_spline_eval(rho_g_spline, a, acc),                // 10:rho_g
+                    gsl_spline_eval(rho_ur_spline, a, acc),               // 11:rho_ur
+                    gsl_spline_eval(rho_crit_spline, a, acc),             // 12:rho_crit
+                    gsl_spline_eval(rho_smg_spline, a, acc),              // 13:rho_smg
+                    gsl_spline_eval(p_smg_spline, a, acc),                // 14:p_smg
+                    gsl_spline_eval(rho_smg_prime_spline, a, acc),        // 15:rho_smg_prime
+                    gsl_spline_eval(p_smg_prime_spline, a, acc),          // 16:p_smg_prime
+                    gsl_spline_eval(alpha_K_spline, a, acc),              // 17:alpha_K
+                    gsl_spline_eval(alpha_B_spline, a, acc),              // 18:alpha_B
+                    gsl_spline_eval(alpha_K_prime_spline, a, acc),        // 19:alpha_K_prime
+                    gsl_spline_eval(alpha_B_prime_spline, a, acc),        // 20:alpha_B_prime
+					gsl_spline_eval(cs2_spline, a, acc),                  // 21:cs2
+                    gsl_spline_eval(cs2num_spline, a, acc),               // 22:cs2num
+                    gsl_spline_eval(kin_D_spline, a, acc),                // 23:kin (D)
+					phi_hom,                                              // 24:phi(k=0)
+					T00hom                                               // 25:T00hom
+				); */
+
+			fprintf(outfile, format,
+                    cycle,                                                                     // 0:cycle (int)
+                    tau,                                                                       // 1:tau/boxsize (double)
+                    a,                                                                         // 2:a (double)
+					1./a-1.,                                                                   // 3:z
+                    gsl_spline_eval(cosmo.H_spline, a, cosmo.acc_H_s),                         // 4:H [1/Mpc]
+                    Hconf(a, fourpiG, cosmo),                                                  // 5:Hconf
+                    Hconf_prime(a, fourpiG, cosmo),                                            // 6:Hconf_prime
+					Hconf_prime_prime(a, fourpiG, cosmo),                                      // 7:Hconf_prime_prime
+                    gsl_spline_eval(cosmo.rho_cdm_spline, a, cosmo.acc_rho_cdm),             // 8:rho_cdm
+                    gsl_spline_eval(cosmo.rho_b_spline, a, cosmo.acc_rho_b),                 // 9:rho_b
+                    gsl_spline_eval(cosmo.rho_g_spline, a, cosmo.acc_rho_g),                 // 10:rho_g
+                    gsl_spline_eval(cosmo.rho_ur_spline, a, cosmo.acc_rho_ur),               // 11:rho_ur
+                    gsl_spline_eval(cosmo.rho_crit_spline, a, cosmo.acc_rho_crit),           // 12:rho_crit
+                    gsl_spline_eval(cosmo.rho_smg_spline, a, cosmo.acc_rho_smg),              // 13:rho_smg
+                    gsl_spline_eval(cosmo.p_smg_spline, a, cosmo.acc_p_smg),                  // 14:p_smg
+                    gsl_spline_eval(cosmo.rho_smg_prime_spline, a, cosmo.acc_rho_smg_prime),  // 15:rho_smg_prime
+                    gsl_spline_eval(cosmo.p_smg_prime_spline, a, cosmo.acc_p_smg_prime),      // 16:p_smg_prime
+                    gsl_spline_eval(cosmo.alpha_K_spline, a, cosmo.acc_alpha_K),              // 17:alpha_K
+                    gsl_spline_eval(cosmo.alpha_B_spline, a, cosmo.acc_alpha_B),              // 18:alpha_B
+                    gsl_spline_eval(cosmo.alpha_K_prime_spline, a, cosmo.acc_alpha_K_prime),  // 19:alpha_K_prime
+                    gsl_spline_eval(cosmo.alpha_B_prime_spline, a, cosmo.acc_alpha_B_prime),  // 20:alpha_B_prime
+					gsl_spline_eval(cosmo.cs2_spline, a, cosmo.acc_cs2),                      // 21:cs2
+                    gsl_spline_eval(cosmo.cs2num_spline, a, cosmo.acc_cs2num),                // 22:cs2num
+                    gsl_spline_eval(cosmo.kin_D_spline, a, cosmo.acc_kin_D),                  // 23:kin (D)
+					phi_hom,                                                                    // 24:phi(k=0)
+					T00hom                                                                      // 25:T00hom
+				); 
+        #else
+        #endif
+				//Ahmad end
 #endif
 				fclose(outfile);
 			}
@@ -988,7 +1344,10 @@ int main(int argc, char **argv)
 #ifdef HAVE_CLASS
 				class_background, class_perturbs, ic,
 #endif
-				&pcls_cdm, &pcls_b, pcls_ncdm, &phi, &chi, &Bi, &source, &Sij, zetaFT, &scalarFT, &BiFT, &SijFT, &plan_phi, &plan_chi, &plan_Bi, &plan_source, &plan_Sij
+#ifdef HAVE_HICLASS_BG
+				cosmo.H_spline, cosmo.acc_H_s, gsl_spline_eval(cosmo.rho_smg_spline, a, cosmo.acc_rho_smg), gsl_spline_eval(cosmo.rho_crit_spline, 1., cosmo.acc_rho_crit),
+#endif
+				&pcls_cdm, &pcls_b, pcls_ncdm, &phi, &pi_k, &zeta_half, &chi, &Bi, &T00_kgb, &T0i_kgb, &Tij_kgb, &source, &Sij, zetaFT, &scalarFT, &scalarFT_pi, &scalarFT_zeta_half, &BiFT, &T00_kgbFT, &T0i_kgbFT, &Tij_kgbFT, &SijFT, &plan_phi, &plan_pi_k , &plan_zeta_half, &plan_chi, &plan_Bi, &plan_T00_kgb, &plan_T0i_kgb, &plan_Tij_kgb , &plan_source, &plan_Sij
 #ifdef CHECK_B
 				, &Bi_check, &BiFT_check, &plan_Bi_check
 #endif
@@ -999,6 +1358,17 @@ int main(int argc, char **argv)
 				, &hijFT, &hijprimeFT
 #endif
 			);
+		//Ahmad added
+if (sim.out_pk & MASK_PHI_PRIME)
+		{
+		writeSpectra_phi_prime(sim, cosmo, fourpiG,  a, pkcount,
+		#ifdef HAVE_HICLASS_BG
+		cosmo.H_spline, cosmo.acc_H_s,
+		#endif
+		&phi_prime ,&phi_prime_scalarFT ,  &phi_prime_plan);
+			}
+
+		//Ahmad end
 
 			pkcount++;
 			nvtxRangePop();
@@ -1016,7 +1386,10 @@ int main(int argc, char **argv)
 #ifdef HAVE_CLASS
 				class_background, class_perturbs, ic,
 #endif
-				&pcls_cdm, &pcls_b, pcls_ncdm, &phi, &chi, &Bi, &source, &Sij, zetaFT, &scalarFT, &BiFT, &SijFT, &plan_phi, &plan_chi, &plan_Bi, &plan_source, &plan_Sij
+#ifdef HAVE_HICLASS_BG
+				cosmo.H_spline, cosmo.acc_H_s, gsl_spline_eval(cosmo.rho_smg_spline, a, cosmo.acc_rho_smg), gsl_spline_eval(cosmo.rho_crit_spline, 1., cosmo.acc_rho_crit),
+#endif
+				&pcls_cdm, &pcls_b, pcls_ncdm, &phi, &pi_k, &zeta_half, &chi, &Bi, &T00_kgb, &T0i_kgb, &Tij_kgb, &source, &Sij, zetaFT, &scalarFT, &scalarFT_pi, &scalarFT_zeta_half, &BiFT, &T00_kgbFT, &T0i_kgbFT, &Tij_kgbFT, &SijFT, &plan_phi, &plan_pi_k , &plan_zeta_half, &plan_chi, &plan_Bi, &plan_T00_kgb, &plan_T0i_kgb, &plan_Tij_kgb , &plan_source, &plan_Sij
 #ifdef CHECK_B
 				, &Bi_check, &BiFT_check, &plan_Bi_check
 #endif
@@ -1027,6 +1400,16 @@ int main(int argc, char **argv)
 				, &hijFT, &hijprimeFT
 #endif
 			);
+// Ahmad added
+if (sim.out_pk & MASK_PHI_PRIME)
+	{
+	writeSpectra_phi_prime(sim, cosmo, fourpiG,  a, pkcount,
+	#ifdef HAVE_HICLASS_BG
+	 cosmo.H_spline, cosmo.acc_H_s,
+	#endif
+	&phi_prime ,&phi_prime_scalarFT ,  &phi_prime_plan);
+	}
+// Ahmad end		
 			nvtxRangePop();
 		}
 #endif // EXACT_OUTPUT_REDSHIFTS
@@ -1079,6 +1462,67 @@ int main(int argc, char **argv)
 			
 			COUT << endl;
 		}
+
+		// KGB loop start!
+		#ifdef BENCHMARK
+			ref_time = MPI_Wtime();
+		#endif
+		
+		nvtxRangePushA("KGB update");
+		#ifdef HAVE_HICLASS_BG // If we have BG vlaues from hicalss/CLASS!
+		
+			derivatives_update(dtau_old, cycle, phi, phi_old, chi, chi_old, phi_prime, psi_prime); // The derivatives of phi and psi computed at step n! At cycle 0 they are 0! We should use dtau not dtau_old to be the derivative at the requested time similar to the way we update the background a_n -> a_n+1 where we use dtau!
+
+			a_kgb = a;
+			if(cycle==0)
+			{
+				update_zeta(-dtau/ (2.0 * sim.n_kgb_numsteps), dx, a_kgb, fourpiG, gsl_spline_eval(cosmo.H_spline, 1., cosmo.acc_H_s), phi, chi, phi_prime, pi_k, zeta_half, deltaPm, 
+				Hconf(a_kgb, fourpiG, cosmo), Hconf_prime(a_kgb, fourpiG, cosmo), Hconf_prime_prime(a_kgb, fourpiG, cosmo),
+				 gsl_spline_eval(cosmo.rho_smg_spline, a_kgb, cosmo.acc_rho_smg), gsl_spline_eval(cosmo.p_smg_spline, a_kgb, cosmo.acc_p_smg), gsl_spline_eval(cosmo.p_smg_prime_spline, a_kgb, cosmo.acc_p_smg_prime), gsl_spline_eval(cosmo.rho_crit_spline, 1., cosmo.acc_rho_crit),
+				 gsl_spline_eval(cosmo.alpha_K_spline, a_kgb, cosmo.acc_alpha_K), gsl_spline_eval(cosmo.alpha_B_spline, a_kgb, cosmo.acc_alpha_B), gsl_spline_eval(cosmo.alpha_K_prime_spline, a_kgb, cosmo.acc_alpha_K_prime), 
+				 gsl_spline_eval(cosmo.alpha_B_prime_spline, a_kgb, cosmo.acc_alpha_B_prime), sim.NL_kgb);
+				zeta_half.updateHalo();
+			}
+			for (int i=0;i<sim.n_kgb_numsteps;i++)
+			{
+				update_zeta(dtau/ sim.n_kgb_numsteps, dx, a_kgb, fourpiG, gsl_spline_eval(cosmo.H_spline, 1., cosmo.acc_H_s), phi, chi, phi_prime, pi_k, zeta_half, deltaPm, 
+				Hconf(a_kgb, fourpiG, cosmo), Hconf_prime(a_kgb, fourpiG, cosmo), Hconf_prime_prime(a_kgb, fourpiG, cosmo),
+				 gsl_spline_eval(cosmo.rho_smg_spline, a_kgb, cosmo.acc_rho_smg), gsl_spline_eval(cosmo.p_smg_spline, a_kgb, cosmo.acc_p_smg), gsl_spline_eval(cosmo.p_smg_prime_spline, a_kgb, cosmo.acc_p_smg_prime), gsl_spline_eval(cosmo.rho_crit_spline, 1., cosmo.acc_rho_crit),
+				 gsl_spline_eval(cosmo.alpha_K_spline, a_kgb, cosmo.acc_alpha_K), gsl_spline_eval(cosmo.alpha_B_spline, a_kgb, cosmo.acc_alpha_B), gsl_spline_eval(cosmo.alpha_K_prime_spline, a_kgb, cosmo.acc_alpha_K_prime), 
+				 gsl_spline_eval(cosmo.alpha_B_prime_spline, a_kgb, cosmo.acc_alpha_B_prime), sim.NL_kgb);
+				zeta_half.updateHalo();
+
+				rungekutta4bg(a_kgb, fourpiG, cosmo, dtau  / sim.n_kgb_numsteps / 2.0);
+				update_pi(dtau/ sim.n_kgb_numsteps, dtau,  phi, chi, psi_prime, pi_k, zeta_half, Hconf(a_kgb, fourpiG, cosmo)); // H_old is updated here in the function
+				pi_k.updateHalo();
+				rungekutta4bg(a_kgb, fourpiG, cosmo, dtau  / sim.n_kgb_numsteps / 2.0);
+			}
+		#else // If not HAVE_HICLASS_BG We use  KGB-evolution with w, c_s^2 constants.
+			derivatives_update(dtau_old, cycle, phi, phi_old, chi, chi_old, phi_prime, psi_prime); // The derivatives of phi and psi computed at step n! At cycle 0 they are 0! We should use dtau not dtau_old to be the derivative at the requested time similar to the way we update the background a_n -> a_n+1 where we use dtau!
+			a_kgb = a;
+			//First we update zeta_half to have it at -1/2 just in the first loop
+			if(cycle==0)
+			{
+				update_zeta(-dtau/(2.0 * sim.n_kgb_numsteps) , dx, a_kgb, phi, chi, phi_prime, pi_k, zeta_half, cosmo.cs2_kgb, 0., cosmo.w_kgb, Hconf(a_kgb, fourpiG, cosmo), Hconf_prime(a_kgb, fourpiG, cosmo), sim.NL_kgb);
+				zeta_half.updateHalo();
+			}
+			for (int i=0;i<sim.n_kgb_numsteps;i++)
+			{
+				update_zeta(dtau/ sim.n_kgb_numsteps, dx, a_kgb, phi, chi, phi_prime, pi_k, zeta_half, cosmo.cs2_kgb, 0., cosmo.w_kgb, Hconf(a_kgb, fourpiG, cosmo), Hconf_prime(a_kgb, fourpiG, cosmo), sim.NL_kgb);
+				zeta_half.updateHalo();
+				rungekutta4bg(a_kgb, fourpiG, cosmo, dtau/sim.n_kgb_numsteps/2.0);
+				update_pi(dtau/ sim.n_kgb_numsteps, dtau, phi, chi, psi_prime, pi_k, zeta_half, Hconf(a_kgb, fourpiG, cosmo)); 
+				pi_k.updateHalo();
+				rungekutta4bg(a_kgb, fourpiG, cosmo, dtau/sim.n_kgb_numsteps/2.0 );
+			}
+		#endif // KGB - LeapFrog: End
+		nvtxRangePop();
+       
+
+		#ifdef BENCHMARK
+			kgb_update_time += MPI_Wtime() - ref_time;
+			ref_time = MPI_Wtime();
+		#endif
 
 		nvtxRangePushA("Particle update: ncdm species");
 #ifdef BENCHMARK

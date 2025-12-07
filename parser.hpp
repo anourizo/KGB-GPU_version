@@ -15,6 +15,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <cstring>
 #include <stdlib.h>
 #include <map>
 #include <tuple>
@@ -658,6 +659,14 @@ bool parseFieldSpecifiers(parameter * & params, const int numparam, const char *
 				
 				if (strcmp(item, "Phi") == 0 || strcmp(item, "phi") == 0)
 					pvalue |= MASK_PHI;
+		//kgb part
+				else if (strcmp(item, "phi_prime") == 0 || strcmp(item, "Phi_prime") == 0)
+						pvalue |= MASK_PHI_PRIME;
+				else if (strcmp(item, "Pi_k") == 0 || strcmp(item, "pi_k") == 0)
+					pvalue |= MASK_PI_K;
+				else if (strcmp(item, "Zeta") == 0 || strcmp(item, "zeta") == 0)
+					pvalue |= MASK_ZETA;
+          //kgb end
 				else if (strcmp(item, "Chi") == 0 || strcmp(item, "chi") == 0)
 					pvalue |= MASK_CHI;
 				else if (strcmp(item, "Pot") == 0 || strcmp(item, "pot") == 0 || strcmp(item, "Psi_N") == 0 || strcmp(item, "psi_N") == 0 || strcmp(item, "PsiN") == 0 || strcmp(item, "psiN") == 0)
@@ -689,12 +698,29 @@ bool parseFieldSpecifiers(parameter * & params, const int numparam, const char *
 				else if (strcmp(item, "v") == 0 || strcmp(item, "velocity") == 0)
 					pvalue |= MASK_VEL;
 					
-				start = comma+1;
+          //kgb part
+				else if (strcmp(item, "T00_kgb") == 0 || strcmp(item, "T00_KGB") == 0)
+					pvalue |= MASK_T_KGB;
+				else if (strcmp(item, "delta_kgb") == 0 || strcmp(item, "delta_KGB") == 0)
+					pvalue |= MASK_DELTA_KGB;
+        else if (strcmp(item, "cross_dkgb_dm") == 0 || strcmp(item, "cross_dKGB_dm") == 0)
+          pvalue |= MASK_DELTAKGB_DELTA;
+			//kgb end
+
+					start = comma+1;
 				while (*start == ' ' || *start == '\t') start++;
 			}  
 			
 			if (strcmp(start, "Phi") == 0 || strcmp(start, "phi") == 0)
 				pvalue |= MASK_PHI;
+		//kgb part
+			else if (strcmp(start, "Phi_prime") == 0 || strcmp(start, "phi_prime") == 0)
+				pvalue |= MASK_PHI_PRIME;
+			else if (strcmp(start, "Pi_k") == 0 || strcmp(start, "pi_k") == 0)
+				pvalue |= MASK_PI_K;
+			else if (strcmp(start, "Zeta") == 0 || strcmp(start, "zeta") == 0)
+				pvalue |= MASK_ZETA;
+        //kgb end
 			else if (strcmp(start, "Chi") == 0 || strcmp(start, "chi") == 0)
 				pvalue |= MASK_CHI;
 			else if (strcmp(start, "Pot") == 0 || strcmp(start, "pot") == 0 || strcmp(start, "Psi_N") == 0 || strcmp(start, "psi_N") == 0 || strcmp(start, "PsiN") == 0 || strcmp(start, "psiN") == 0)
@@ -725,6 +751,12 @@ bool parseFieldSpecifiers(parameter * & params, const int numparam, const char *
 				pvalue |= MASK_DBARE;
 			else if (strcmp(start, "v") == 0 || strcmp(start, "velocity") == 0)
 					pvalue |= MASK_VEL;
+			else if (strcmp(start, "T00_kgb") == 0 || strcmp(start, "T00_KGB") == 0)
+        		pvalue |= MASK_T_KGB;
+      		else if (strcmp(start, "delta_kgb") == 0 || strcmp(start, "delta_KGB") == 0)
+        		pvalue |= MASK_DELTA_KGB;
+      		else if (strcmp(start, "cross_dkgb_dm") == 0 || strcmp(start, "cross_dKGB_dm") == 0)
+        		pvalue |= MASK_DELTAKGB_DELTA;
 			
 			params[i].used = true;
 			return true;
@@ -769,6 +801,10 @@ int parseMetadata(parameter * & params, const int numparam, metadata & sim, cosm
 	
 	ic.pkfile[0] = '\0';
 	ic.tkfile[0] = '\0';
+	//kgb part
+  	ic.IC_kgb = 0;
+	ic.tk_kgb[0]='\0';
+	//kgb end
 	ic.metricfile[0][0] = '\0';
 	ic.metricfile[1][0] = '\0';
 	ic.metricfile[2][0] = '\0';
@@ -786,6 +822,15 @@ int parseMetadata(parameter * & params, const int numparam, metadata & sim, cosm
 	ic.restart_version = -1.;
 	
 	parseParameter(params, numparam, "seed", ic.seed);
+	if (parseParameter(params, numparam, "IC generator_kgb", par_string))
+  {
+    if (par_string[0] == 'f' || par_string[0] == 'F')
+      ic.IC_kgb = 1;
+    else if (par_string[0] == 'h' || par_string[0] == 'H')
+      ic.IC_kgb = 2;
+    else if(par_string[0] == 'c' || par_string[0] == 'C')
+      ic.IC_kgb = 0;
+  }
 	
 	if (parseParameter(params, numparam, "IC generator", par_string))
 	{
@@ -858,6 +903,57 @@ int parseMetadata(parameter * & params, const int numparam, metadata & sim, cosm
 		else
 			strcpy(ic.pclfile[i], ic.pclfile[i-1]);
 	}
+
+	//kgb part
+if (ic.IC_kgb == 1)
+{
+  COUT << " initial conditions for kgb fields (pi,zeta) will be computed by the given file" << endl;
+  parseParameter(params, numparam, "T_kgb file", ic.tk_kgb);
+  if (!parseParameter(params, numparam, "T_kgb file", ic.tk_kgb))
+  {
+    COUT << " \033[1;31merror:\033[0m"  << "\033[1;35m no file specified!\033[0m" <<endl;
+#ifdef LATFIELD2_HPP
+      parallel.abortForce();
+#endif
+  }
+  #if defined(HAVE_CLASS) || defined(HAVE_HICLASS) || defined(HAVE_HICLASS_BG)
+  COUT<< " \033[1;31merror:\033[0m"  << "\033[1;35m The code is compiled with the CLASS/hiclass interface while in the settings it is requested to run the code using IC generator = file!\033[0m" <<endl;
+
+  #ifdef LATFIELD2_HPP
+  parallel.abortForce();
+  #endif
+  #endif
+}
+if (ic.IC_kgb == 1 || ic.tkfile[0] != '\0' || ic.pkfile[0] != '\0')
+{
+  #if defined(HAVE_CLASS) || defined(HAVE_HICLASS) || defined(HAVE_HICLASS_BG)
+  COUT << " \033[1;31merror:\033[0m"  << "\033[1;35m The code is compiled with the CLASS/hiclass interface while in the settings it is requested to run the code using IC generator (kgb) = file!\033[0m" <<endl;
+  #ifdef LATFIELD2_HPP
+  parallel.abortForce();
+  #endif
+  #endif
+}
+
+  if (ic.IC_kgb == 0)
+{
+  COUT << " initial conditions for kgb fields (pi,zeta) will be computed using CLASS/hiclass" << endl;
+  #ifndef HAVE_CLASS
+  COUT << " \033[1;31merror:\033[0m"  << "\033[1;35m CLASS interface requested while the code has been compiled without it!\033[0m" <<endl;
+  #ifdef LATFIELD2_HPP
+  parallel.abortForce();
+  #endif
+  #endif
+}
+if (ic.IC_kgb == 2)
+{
+COUT << " initial conditions for kgb fields (pi,zeta) will be computed using hiclass" << endl;
+#ifndef HAVE_HICLASS
+COUT << " \033[1;31merror:\033[0m"  << "\033[1;35m HICLASS interface requested while the code has been compiled without it!\033[0m" <<endl;
+#ifdef LATFIELD2_HPP
+      parallel.abortForce();
+#endif
+#endif
+}
 
 	if ((!parseParameter(params, numparam, "mPk file", ic.pkfile) && !parseParameter(params, numparam, "Tk file", ic.tkfile)
 #ifdef ICGEN_SONG
@@ -1313,6 +1409,13 @@ int parseMetadata(parameter * & params, const int numparam, metadata & sim, cosm
 	parseParameter(params, numparam, "snapshot redshifts", sim.z_snapshot, sim.num_snapshot);
 	if (sim.num_snapshot > 0)
 		qsort((void *) sim.z_snapshot, (size_t) sim.num_snapshot, sizeof(double), sort_descending);
+
+	// kgb snapshots for blowup
+    if (!parseParameter(params, numparam, "num_snapshot_kgb",  sim.num_snapshot_kgb))
+      {
+          sim.num_snapshot_kgb=0;
+      }
+
 	
 	parseParameter(params, numparam, "Pk redshifts", sim.z_pk, sim.num_pk);
 	if (sim.num_pk > 0)
@@ -1690,6 +1793,254 @@ int parseMetadata(parameter * & params, const int numparam, metadata & sim, cosm
 	{
 		cosmo.h = P_HUBBLE;
 	}
+
+		// kgb  paramteres
+    #if defined(HAVE_HICLASS) || defined(HAVE_HICLASS_BG)
+    if (parseParameter(params, numparam, "gravity_model", par_string))
+    {
+       if (par_string[0] == 'k' || par_string[0] == 'K')
+      {
+        COUT << " modified gravity model set to: " << COLORTEXT_CYAN << "k_essence_power" << COLORTEXT_RESET << endl;
+        cosmo.gravity_model = 3; // One needs to provide Xt, g0, g2, g4, phi_i, X_i
+      }
+      else if (std::strlen(par_string) > 0 && par_string[0] == 'p' && par_string[std::strlen(par_string) - 1] == 'a')
+     {
+       COUT << " modified gravity model set to: " << COLORTEXT_CYAN << "propto_omega" << COLORTEXT_RESET << endl;
+       cosmo.gravity_model = 0; // One needs to provide parameters_smg and expansion_smg
+     }
+	  else if (std::strlen(par_string) > 0 && par_string[0] == 'p' && par_string[std::strlen(par_string) - 1] == 'e')
+     {
+       COUT << " modified gravity model set to: " << COLORTEXT_CYAN << "propto_scale" << COLORTEXT_RESET << endl;
+       cosmo.gravity_model = 1; // One needs to provide parameters_smg and expansion_smg
+     }
+	  else if (std::strlen(par_string) > 0 && par_string[0] == 'c' )
+     {
+       COUT << " modified gravity model set to: " << COLORTEXT_CYAN << "constant_alphas" << COLORTEXT_RESET << endl;
+       cosmo.gravity_model = 2; // One needs to provide parameters_smg and expansion_smg
+     }
+	  else
+     {
+		COUT << " \033[1;31m ERROR: Unrecognized gravity model: " << par_string << " \033[0m" << endl;
+		#ifdef LATFIELD2_HPP
+        parallel.abortForce();
+		#endif
+     }
+    }
+     else
+     {
+       COUT << " \033[1;31m ERROR: You need to specify modified gravity model!  \033[0m"<< endl;
+	   #ifdef LATFIELD2_HPP
+       parallel.abortForce();
+	   #endif
+     }
+	 // kgb
+    if (cosmo.gravity_model == 0 || cosmo.gravity_model == 1 || cosmo.gravity_model == 2)
+    {
+	int num_alpha_params = 5;
+	if (parseParameter(params, numparam, "parameters_smg", cosmo.x_i, num_alpha_params))
+    {
+	  cosmo.x_k = cosmo.x_i[0];
+      cosmo.x_b = cosmo.x_i[1];
+      COUT<<"The alpha parameters are: "<<"\033[36;1m alpha_K= \033[0m" << cosmo.x_k <<"\033[36;1m, alpha_B= \033[0m" << cosmo.x_b <<"\033[36;1m, alpha_M= \033[0m" << cosmo.x_i[2] <<"\033[36;1m, alpha_t= \033[0m" << cosmo.x_i[3]<<"\033[36;1m, M= \033[0m" << cosmo.x_i[4]<<endl;
+    }
+     else
+     {
+       COUT << " \033[1;31m ERROR: You need to specify modified parameters_smg!  \033[0m"<< endl;
+	   #ifdef LATFIELD2_HPP
+       parallel.abortForce();
+	   #endif
+     }
+
+	int num_bg_params = 2;
+	if (parseParameter(params, numparam, "expansion_smg", cosmo.bg_i, num_bg_params))
+    {
+	  cosmo.w_kgb = cosmo.bg_i[0];
+      cosmo.w_a_kgb = cosmo.bg_i[1];
+    }
+     else
+     {
+       COUT << " \033[1;31m ERROR: You need to specify modified expansion_smg!  \033[0m"<< endl;
+	   #ifdef LATFIELD2_HPP
+       parallel.abortForce();
+	   #endif
+     }
+
+      if (parseParameter(params, numparam, "omega_kgb", cosmo.Omega_kgb) || parseParameter(params, numparam, "Omega_kgb", cosmo.Omega_kgb))
+      {
+        COUT << " \033[1;31m ERROR: You cannot specify Omega_kgb in the code! It's being obtained through the closed relation! \033[0m"<< endl;
+		#ifdef LATFIELD2_HPP
+        parallel.abortForce();
+		#endif
+      }
+      // Lambda
+      if (parseParameter(params, numparam, "omega_Lambda", cosmo.Omega_Lambda))
+      {
+      	cosmo.Omega_Lambda /= cosmo.h * cosmo.h;
+      }
+      else if (!parseParameter(params, numparam, "Omega_Lambda", cosmo.Omega_Lambda))
+      {
+      	cosmo.Omega_Lambda = 0.;
+      }
+
+      // ERROR:
+	  /*
+      if (parseParameter(params, numparam, "Xt",  cosmo.Xt))
+      {
+        if(parallel.isRoot())  cout << " \033[1;31m ERROR: You have specified Xt while modified gravity model set to propto_omega !  \033[0m"<< endl;
+        parallel.abortForce();
+      }
+      if (parseParameter(params, numparam, "g0",  cosmo.g0))
+      {
+        if(parallel.isRoot())  cout << " \033[1;31m ERROR: You have specified g0 while modified gravity model set to propto_omega !  \033[0m"<< endl;
+        parallel.abortForce();
+      }
+      if (parseParameter(params, numparam, "g2",  cosmo.g2))
+      {
+        if(parallel.isRoot())  cout << " \033[1;31m ERROR: You have specified g2 while modified gravity model set to propto_omega !  \033[0m"<< endl;
+        parallel.abortForce();
+      }*/
+    }
+	/*
+    else if (cosmo.gravity_model == 3)
+    {
+      if (!parseParameter(params, numparam, "Xt",  cosmo.Xt))
+      {
+        if(parallel.isRoot())  cout << " \033[1;31m ERROR: You need to specify Xt!  \033[0m"<< endl;
+        parallel.abortForce();
+      }
+      if (!parseParameter(params, numparam, "g0",  cosmo.g0))
+      {
+        if(parallel.isRoot())  cout << " \033[1;31m ERROR: You need to specify g0!  \033[0m"<< endl;
+        parallel.abortForce();
+      }
+      if (!parseParameter(params, numparam, "g2",  cosmo.g2))
+      {
+        if(parallel.isRoot())  cout << " \033[1;31m ERROR: You need to specify g2!  \033[0m"<< endl;
+        parallel.abortForce();
+      }
+      if (!parseParameter(params, numparam, "g4",  cosmo.g4))
+      {
+        if(parallel.isRoot())  cout << " \033[1;31m ERROR: You need to specify g4!  \033[0m"<< endl;
+        parallel.abortForce();
+      }
+      if (!parseParameter(params, numparam, "phi_i",  cosmo.phi_i))
+      {
+        if(parallel.isRoot())  cout << " \033[1;31m ERROR: You need to specify phi_i!  \033[0m"<< endl;
+        parallel.abortForce();
+      }
+      if (!parseParameter(params, numparam, "X_i",  cosmo.X_i))
+      {
+        if(parallel.isRoot())  cout << " \033[1;31m ERROR: You need to specify X_i!  \033[0m"<< endl;
+        parallel.abortForce();
+      }
+      // ERRORS:
+      if (parseParameter(params, numparam, "Omega_kgb",  cosmo.Omega_kgb) || parseParameter(params, numparam, "omega_kgb",  cosmo.Omega_kgb))
+      {
+        if(parallel.isRoot())  cout << " \033[1;31m ERROR: You requested k_essence_power while specified Omega_kgb!  \033[0m"<< endl;
+        parallel.abortForce();
+      }
+
+      //
+    }*/
+	
+	
+     // check_bg_file (for the purpouse of the consistency check)
+
+	if (parseParameter(params, numparam, "check_bg_file", par_string))
+    {
+       if (par_string[0] == 'n' || par_string[0] == 'N')
+      {
+        sim.check_bg_file = 0; 
+      }
+      else if (par_string[0] == 'y' || par_string[0] == 'Y')
+     {
+       COUT << " you have asked for check_bg_file (to do consistency check) " << endl;
+       sim.check_bg_file = 1; 
+     }
+	  else
+     {
+       COUT << " \033[1;31m ERROR: incorrect entry for check_bg_file. (it should be either 'yes' or 'no')!  \033[0m"<< endl;
+	   #ifdef LATFIELD2_HPP
+       parallel.abortForce();
+	   #endif
+     }
+    }
+
+	if (!parseParameter(params, numparam, "check_bg_file", par_string))
+	 {
+	   sim.check_bg_file = 0;
+	 }
+
+
+
+
+  #else
+  // If hiclass is not requested!
+	if (!parseParameter(params, numparam, "expansion_smg",  cosmo.bg_i))
+	{
+    COUT << " \033[1;31m ERROR: You need to specify expansion_smg!  \033[0m"<< endl;
+	#ifdef LATFIELD2_HPP
+    parallel.abortForce();
+	#endif
+	}
+	if (!parseParameter(params, numparam, "parameters_smg",  cosmo.x_i))
+	{
+    COUT << " \033[1;31m ERROR: You need to specify parameters_smg!  \033[0m"<< endl;
+	#ifdef LATFIELD2_HPP
+    parallel.abortForce();
+	#endif
+	}
+	// if (!parseParameter(params, numparam, "Omega_kgb",  cosmo.Omega_kgb))
+	// {
+  //   if(parallel.isRoot())  cout << " \033[1;31m ERROR: You need to specify Omega_kgb!  \033[0m"<< endl;
+  //   parallel.abortForce();
+  // }
+  // kgb
+
+  if (parseParameter(params, numparam, "omega_kgb", cosmo.Omega_kgb) || parseParameter(params, numparam, "Omega_kgb", cosmo.Omega_kgb))
+  {
+    COUT << " \033[1;31m ERROR: You cannot specify Omega_kgb in the code! It's being obtained through the closed relation! \033[0m"<< endl;
+	#ifdef LATFIELD2_HPP
+    parallel.abortForce();
+	#endif
+  }
+  // Lambda
+  if (parseParameter(params, numparam, "omega_Lambda", cosmo.Omega_Lambda))
+  {
+    cosmo.Omega_Lambda /= cosmo.h * cosmo.h;
+  }
+  else if (!parseParameter(params, numparam, "Omega_Lambda", cosmo.Omega_Lambda))
+  {
+    cosmo.Omega_Lambda = 0.;
+  }
+
+  #endif
+
+  if (!parseParameter(params, numparam, "n_kgb_numsteps",  sim.n_kgb_numsteps))
+  {
+    sim.n_kgb_numsteps = 1;
+  }
+  if (!parseParameter(params, numparam, "kgb source gravity", sim.kgb_source_gravity))
+  {
+    sim.kgb_source_gravity = 0;
+  }
+  if (!parseParameter(params, numparam, "NL_kgb", sim.NL_kgb))
+  {
+    sim.NL_kgb = 0; //Default is linear kgb.
+  }
+  if (!parseParameter(params, numparam, "background hiclass", sim.bg_hiclass))
+  {
+    sim.bg_hiclass = 0; //Default is constant parameters and using the default kgb-evolution version!
+  }
+
+  #if defined(HAVE_HICLASS) && defined(HAVE_HICLASS_BG)
+      if (sim.bg_hiclass==1)
+      {
+        COUT << "\033[1;32m The background quantitie are being provided by hiclass (H, w, c_s^2, c_a^2)! \033[0m"<< endl;
+      }
+  #endif
+
+  //kgb end
 	
 	cosmo.num_ncdm = MAX_PCL_SPECIES-2;
 	if (!parseParameter(params, numparam, "m_ncdm", cosmo.m_ncdm, cosmo.num_ncdm))
@@ -1807,6 +2158,8 @@ int parseMetadata(parameter * & params, const int numparam, metadata & sim, cosm
 		COUT << COLORTEXT_YELLOW << " /!\\ warning" << COLORTEXT_RESET << ": Omega_cdm not found in settings file, setting to default (1)." << endl;
 		cosmo.Omega_cdm = 1.;
 	}
+
+	
 	
 	cosmo.Omega_m = cosmo.Omega_cdm + cosmo.Omega_b;
 	for (i = 0; i < cosmo.num_ncdm; i++) cosmo.Omega_m += cosmo.Omega_ncdm[i];
@@ -1827,8 +2180,44 @@ int parseMetadata(parameter * & params, const int numparam, metadata & sim, cosm
 	}
 	else
 	{
-		COUT << " cosmological parameters are: Omega_m0 = " << cosmo.Omega_m << ", Omega_rad0 = " << cosmo.Omega_rad << ", h = " << cosmo.h << endl;
-		cosmo.Omega_Lambda = 1. - cosmo.Omega_m - cosmo.Omega_rad - cosmo.Omega_fld;
+		//COUT << " cosmological parameters are: Omega_m0 = " << cosmo.Omega_m << ", Omega_rad0 = " << cosmo.Omega_rad << ", h = " << cosmo.h << endl;
+		//cosmo.Omega_Lambda = 1. - cosmo.Omega_m - cosmo.Omega_rad - cosmo.Omega_fld;
+		
+		// KGB part added  closed relation for Omega_kgb
+    #ifdef HAVE_HICLASS_BG
+    if (cosmo.gravity_model == 0 || cosmo.gravity_model == 1 || cosmo.gravity_model == 2)
+    {
+      cosmo.Omega_kgb  = 1. - cosmo.Omega_m - cosmo.Omega_Lambda - cosmo.Omega_rad;
+	  COUT<<"The expansion parameters are: "<<"\033[36;1m Omega_kgb0 (set from closed relation)= \033[0m" << cosmo.Omega_kgb <<"\033[36;1m, w_kgb= \033[0m" << cosmo.w_kgb <<"\033[36;1m, w_a_kgb= \033[0m" << cosmo.w_a_kgb <<endl;
+    }
+    else
+    {
+      cosmo.Omega_Lambda = 0.;
+    }
+    #else
+		cosmo.Omega_kgb  = 1. - cosmo.Omega_m - cosmo.Omega_Lambda - cosmo.Omega_rad;
+    #endif
+
+  // WARNING:
+  if (cosmo.Omega_Lambda != 0)
+  {
+    COUT << COLORTEXT_YELLOW << " /!\\ warning" << COLORTEXT_RESET << ": You have requested mixed dark energy scenario which is not tested well! Before using this implementaion you need to perfomr some tests!" << endl;
+  }
+    #ifdef HAVE_HICLASS_BG
+  if (cosmo.gravity_model == 0 || cosmo.gravity_model == 1 || cosmo.gravity_model == 2)
+  {
+    COUT << "kgb source gravity = " << sim.kgb_source_gravity<< ", Non-linear kgb = " << sim.NL_kgb<< ", Number of kgb update = " <<sim.n_kgb_numsteps <<endl;
+    COUT << " cosmological parameters are: Omega_m0 = " << cosmo.Omega_m << ", Omega_rad0 = " << cosmo.Omega_rad<< ", Omega_g0 = " << cosmo.Omega_g<< ", Omega_ur0 = " << cosmo.Omega_ur << ", h = " << cosmo.h << ", Omega_Lambda= "<<cosmo.Omega_Lambda<<" "<<endl;
+  }
+  else if (cosmo.gravity_model == 3)
+  {
+    COUT<<COLORTEXT_CYAN<<"modified gravity model:"<<" k_essence_power, "<< "kgb source gravity = " << sim.kgb_source_gravity<< ", Non-linear kgb = " << sim.NL_kgb<< ", Number of kgb update = " <<sim.n_kgb_numsteps <<endl;
+    COUT << " cosmological parameters are: Omega_m0 = " << cosmo.Omega_m << ", Omega_rad0 = " << cosmo.Omega_rad<< ", Omega_g0 = " << cosmo.Omega_g<< ", Omega_ur0 = " << cosmo.Omega_ur << ", h = " << cosmo.h << ", Xt= "<<cosmo.Xt<<", g0= "<<cosmo.g0<<", g2= "<<cosmo.g2<<", g4= "<<cosmo.g4<<", phi_i= "<<cosmo.phi_i<<", X_i= "<<cosmo.X_i<< ", Omega_Lambda= "<<cosmo.Omega_Lambda<<" "<<COLORTEXT_RESET<<endl;
+  }
+  #else
+  COUT << "kgb source gravity = " << sim.kgb_source_gravity<< ", Non-linear kgb = " << sim.NL_kgb<< ", Number of kgb update = " <<sim.n_kgb_numsteps <<endl;
+  COUT << " cosmological parameters are: Omega_m0 = " << cosmo.Omega_m << ", Omega_rad0 = " << cosmo.Omega_rad<< ", Omega_g0 = " << cosmo.Omega_g<< ", Omega_ur0 = " << cosmo.Omega_ur << ", h = " << cosmo.h << ", Omega_Lambda= "<<cosmo.Omega_Lambda<<" "<<endl;
+  #endif
 	}
 
 	if(!parseParameter(params, numparam, "switch delta_rad", sim.z_switch_deltarad))

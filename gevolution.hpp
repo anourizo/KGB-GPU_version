@@ -3374,5 +3374,660 @@ void projectFTomega(Field<Cplx> & viFT)
 	}
 }
 
+__host__ __device__ void prepareTmunu_kgb(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+
+{
+	   
+	   double a    = params[0];
+	   double Hconf = params[1];
+	   double Hconf_prime = params[2];
+	   double rho_plus_P = params[3];
+	   double Mpl2 = params[4];
+	   double alpha_B = params[5];
+	   double alpha_K = params[6];
+	   double dx = params[7];
+	   double A_deltaPm = params[8];
+	   double A_Laplace_pi = params[9];
+	   double A_Laplace_psi = params[10];
+	   double A_phi_prime = params[11];
+	   double A_psi = params[12];
+	   double A_pi = params[13];
+	   double A_zeta = params[14];
+
+	   // FIXME
+
+	   // Fields = {phi, phi_prime, chi, pi_k, zeta_half, T00, Tij, deltaPm, source}
+	   
+	//****************************************************************
+		//Laplace pi, pi(n) since pi is not updated yet
+		//****************************************************************
+		Real Laplacian_pi = (*fields[3])(sites[0]-0) + (*fields[3])(sites[0]+0) - Real(2) * (*fields[3])(sites[0]); 
+		Laplacian_pi += (*fields[3])(sites[0]+1) + (*fields[3])(sites[0]-1) - Real(2) * (*fields[3])(sites[0]);
+		Laplacian_pi += (*fields[3])(sites[0]+2) + (*fields[3])(sites[0]-2) - Real(2) * (*fields[3])(sites[0]);
+		Laplacian_pi = Laplacian_pi/(dx*dx);
+
+
+		// Laplacian_pi = -1. * (pi_k(xField+0+0) + pi_k(xField-0-0)) + 16.* (pi_k(xField-0) + pi_k(xField+0)) - 30. * pi_k(xField); 
+		// Laplacian_pi += -1. * (pi_k(xField+1+1) + pi_k(xField-1-1)) + 16.* (pi_k(xField-1) + pi_k(xField+1))  - 30. * pi_k(xField);
+		// Laplacian_pi += -1. * (pi_k(xField+2+2) + pi_k(xField-2-2)) + 16.* (pi_k(xField-2) + pi_k(xField+2))  - 30. * pi_k(xField);
+		// Laplacian_pi = Laplacian_pi/(12.*dx*dx);
+
+
+
+		//****************************************************************
+		//Laplace psi, psi(n) since psi is not updated yet
+		//****************************************************************
+		Real Laplacian_psi = ((*fields[0])(sites[0]-0)- (*fields[2])(sites[0]-0)) + ((*fields[0])(sites[0]+0)- (*fields[2])(sites[0]+0)) - Real(2) * ((*fields[0])(sites[0])- (*fields[2])(sites[0])); 
+		Laplacian_psi += ((*fields[0])(sites[0]-1)- (*fields[2])(sites[0]-1)) + ((*fields[0])(sites[0]+1)- (*fields[2])(sites[0]+1)) - Real(2) * ((*fields[0])(sites[0])- (*fields[2])(sites[0]));
+		Laplacian_psi += ((*fields[0])(sites[0]-2)- (*fields[2])(sites[0]-2)) + ((*fields[0])(sites[0]+2)- (*fields[2])(sites[0]+2)) - Real(2) * ((*fields[0])(sites[0])- (*fields[2])(sites[0]));
+		Laplacian_psi = Laplacian_psi/(dx*dx);
+
+	   Real psi = (*fields[0])(sites[0]) - (*fields[2])(sites[0]); //psi(n)
+        //************************
+        //STRESS TENSOR COMPONENTS
+        //************************
+        // 0-0-component: (Time,Time)
+        // T00(xField)       = -1 * pow(a,3) * (rho_s/rho_crit)+ 0.*((rho_s/rho_crit) -1 * pow(a , 3) * ((Mpl2 / (a * a)) * (alpha_B * Hconf * Laplacian_pi + 3. * alpha_B * Hconf * phi_prime(xField) ) 
+		// 					  ));
+
+	  // T^0_0 = -\rho-\delta\rho, we have also -1 factor from gevolution notation and in the snapshots we record -T^0_0 and this makes everything positive
+		
+		(*fields[5])(sites[0])       =   - pow(a , 3)  * ((Mpl2 / (a * a)) * ( alpha_B * Hconf * Laplacian_pi  + 3. * alpha_B * Hconf * Hconf * psi - (3. * alpha_B + alpha_K) * Hconf * Hconf * (*fields[4])(sites[0]) + 3. * alpha_B * Hconf * (*fields[1])(sites[0]))
+								+ ( (Mpl2 / (a * a)) * alpha_B * Hconf_prime- (Mpl2 / (a * a)) * alpha_B * Hconf * Hconf + rho_plus_P) * 3. * Hconf * (*fields[3])(sites[0])); 
+
+		// COUT<< COLORTEXT_CYAN << "delta_rho = "<< COLORTEXT_RESET << T00(xField) << endl;
+		// COUT<< COLORTEXT_LIGHT_BROWN  << "rho_back = "<< COLORTEXT_RESET << -1 * pow(a , 3) * rho_s/rho_crit << endl;					  
+        //*************************************************************************************
+		// T00(xField)  = 0;
+        // 1-1-component: (X,X)
+        (*fields[6])(sites[0], 0, 0) = pow(a , 3) * (+ A_deltaPm * (*fields[7])(sites[0]) + A_Laplace_psi * Laplacian_psi + A_psi * psi + A_phi_prime * (*fields[1])(sites[0]) + A_Laplace_pi * Laplacian_pi + A_zeta * (*fields[4])(sites[0]) + A_pi * (*fields[3])(sites[0])) ;
+        //*************************************************************************************
+        // 2-2-component: (Y,Y)
+        (*fields[6])(sites[0], 1, 1) = pow(a , 3) * (+ A_deltaPm * (*fields[7])(sites[0]) + A_Laplace_psi * Laplacian_psi + A_psi * psi + A_phi_prime * (*fields[1])(sites[0]) + A_Laplace_pi * Laplacian_pi + A_zeta * (*fields[4])(sites[0]) + A_pi * (*fields[3])(sites[0])) ;
+        //*************************************************************************************
+        // 3-3-component: (Z,Z)
+        (*fields[6])(sites[0], 2, 2) = pow(a , 3) * (+ A_deltaPm * (*fields[7])(sites[0]) + A_Laplace_psi * Laplacian_psi + A_psi * psi + A_phi_prime * (*fields[1])(sites[0]) + A_Laplace_pi * Laplacian_pi + A_zeta * (*fields[4])(sites[0]) + A_pi * (*fields[3])(sites[0])) ;
+
+		(*fields[8])(sites[0]) += (*fields[5])(sites[0]);
+//  Tij(xField, 0, 0) = 0;
+//  Tij(xField, 1, 1) = 0;
+//  Tij(xField, 2, 2) = 0;
+
+}
+
+// callable struct for prepareTmunu_kgb
+
+struct prepareTmunu_kgb_functor
+{
+	__host__ __device__ void operator()(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+	{
+		prepareTmunu_kgb(fields, sites, nfields, params, outputs);
+	}
+};
+
+
+
+//////////////////////////
+// KGB Stress Tensor
+//////////////////////////
+// Description:
+//   Projection of the KGB field for the stress-energy tensor (Tmunu).
+//   This function calculates the components of the stress tensor and includes geometric corrections 
+//   through the Bardeen potential.
+//
+// Arguments:
+//   T00           reference to the target field for the 00-component of the stress-energy tensor
+//   T0i           reference to the target field for the 0i-components of the stress-energy tensor
+//   Tij           reference to the target field for the ij-components of the stress-energy tensor
+//   dx            lattice spacing (unused in this function)
+//   a             scale factor at the time of projection 
+//   phi           reference to the KGB scalar field configuration
+//   pi_k          reference to the KGB momentum field (in units of 1/H)
+//   zeta_half      reference to the zeta field at half time steps for the stress tensor calculation -- Note that this can be improved as zeta better to be at integer steps synched with particles!
+//   coeff1        coefficient related to the pressure and energy density of the scalar field, normalized by critical density and divided by the sound speed squared: coeff1 = a^3 * (p_smg + rho_smg) / rho_crit / cs2
+//   coeff2        coefficient related to the energy density of the scalar field, normalized by critical density: coeff2 = a^3 * (p_smg + rho_smg) / rho_crit
+//   ca2           adiabatic sound speed squared (in the case of KGB without HiCLASS, c_a^2 = w)
+//   cs2           scalar field sound speed squared
+//   Hcon          conformal Hubble parameter (H/a), relevant in Gevolution's units
+//   non_linearity integer flag indicating whether non-linear terms are included (1 for yes, 0 for no)
+//   method        integer flag indicating the method used for solving the equations:
+//                    - method = 1: vector elliptic method is used
+//                    - method = 0: default method
+//
+// Returns:
+//   (none)
+//
+// Coefficients:
+//   coeff1: a^3 * (p_smg + rho_smg) / rho_crit / cs2, where
+//           - p_smg: pressure of the scalar field
+//           - rho_smg: energy density of the scalar field
+//           - rho_crit: critical density
+//           - cs2: scalar field sound speed squared
+//
+//   coeff2: a^3 * (p_smg + rho_smg) / rho_crit, where
+//           - p_smg: pressure of the scalar field
+//           - rho_smg: energy density of the scalar field
+//           - rho_crit: critical density
+//
+//////////////////////////
+
+
+template <class FieldType>
+void projection_Tmunu_kgb( Field<FieldType> & T00, Field<FieldType> & T0i, Field<FieldType> & Tij, double dx, double a, double fourpiG, double H0_hiclass, Field<FieldType> & phi, Field<FieldType> & chi,
+ Field<FieldType> & phi_prime, Field<FieldType> & pi_k, Field<FieldType> & zeta_half, Field<FieldType> & deltaPm, Field<FieldType> & source, double Hconf, double Hconf_prime, double Hconf_prime_prime, double rho_s, double P_s, double P_s_prime, double rho_crit,
+ double alpha_K, double alpha_B, double alpha_K_prime, double alpha_B_prime)
+  {
+
+    Site xField(phi.lattice());
+	// Site x(phi.lattice());
+
+    double Mpl2 = 1./(2. * fourpiG); //   fourpiG   1/2 Mpl^2 in the code unit
+	// double Mpl2 = rho_crit / (3 * H0_hiclass * H0_hiclass); //   fourpiG   1/2 Mpl^2 in the code unit
+
+
+	// Introducing tilde rho and P
+	// double rho_s_gev      =  3. * rho_s *(2./3.*fourpiG)/(H0_hiclass * H0_hiclass);
+	// double P_s_gev      =  3. * P_s *(2./3.*fourpiG)/(H0_hiclass * H0_hiclass);
+	// double rho_plus_P     =  rho_s_gev + P_s_gev;
+
+	// double P_s_prime_gev =  3. * P_s_prime *(2./3.*fourpiG)/(H0_hiclass * H0_hiclass) * sqrt(2./3.*fourpiG)/H0_hiclass; // sqrt is for the derivative unit consideration
+
+    double rho_plus_P     =  (rho_s + P_s) / rho_crit;
+    double P_s_prime_gev      =  (P_s_prime / rho_crit) * sqrt(2./3.*fourpiG)/H0_hiclass; // sqrt is for the derivative unit consideration
+
+    // Other unit transformations
+    alpha_B_prime = alpha_B_prime * sqrt(2./3.*fourpiG)/H0_hiclass; // alpha_B_prime[gevolution]  = alpha_B_prime[hiclass ][1/Mpc] * H_0 [gevolution]/ H_0 [hiclass]
+	alpha_K_prime = alpha_K_prime * sqrt(2./3.*fourpiG)/H0_hiclass; // alpha_K_prime[gevolution]  = alpha_K_prime[hiclass ][1/Mpc] * H_0 [gevolution]/ H_0 [hiclass]
+
+	/*cout<< COLORTEXT_YELLOW << "rho_plus_P =  " << COLORTEXT_RESET<<rho_plus_P << endl;
+	 cout<< COLORTEXT_YELLOW << "P_s_prime_gev =  " << COLORTEXT_RESET<<P_s_prime_gev << endl;
+	 cout<< COLORTEXT_YELLOW << "alpha_B_prime =  " << COLORTEXT_RESET<<alpha_B_prime << endl;
+	 cout<< COLORTEXT_YELLOW << "alpha_K_prime =  " << COLORTEXT_RESET<<alpha_K_prime << endl;
+	 cout<< COLORTEXT_YELLOW << "Mpl2 =  " << COLORTEXT_RESET<<Mpl2 << endl;*/
+
+	double Coeff0;
+    Coeff0 = 3. * alpha_B * alpha_B + 2. * alpha_K;
+
+    double A_Laplace_psi, A_deltaPm, A_phi_prime, A_Laplace_pi, A_psi, A_pi, A_zeta;
+
+    // The coeffs for Tij only:
+
+	A_deltaPm      = -3. * alpha_B * alpha_B / Coeff0;
+	A_Laplace_psi  = -2. * Mpl2 * alpha_B * alpha_B / (Coeff0 * a * a);
+	A_psi          =  6. * alpha_B * (Mpl2 * alpha_B * Hconf * Hconf - Mpl2 * Hconf * alpha_B_prime - Mpl2 * alpha_B * Hconf_prime - a * a * rho_plus_P) / (Coeff0 * a * a);
+	A_phi_prime    = A_psi / Hconf;
+	A_Laplace_pi   = -2. * alpha_B * (Mpl2 * Hconf * alpha_B_prime + Mpl2 * alpha_B * Hconf_prime + a * a * rho_plus_P) / (Coeff0 * Hconf * a * a);
+	A_zeta         = -2. * (Mpl2 * alpha_B * alpha_K * Hconf * Hconf + Mpl2 * alpha_K * Hconf * alpha_B_prime - Mpl2 * alpha_B * Hconf * alpha_K_prime - Mpl2 * alpha_B * alpha_K * Hconf_prime - alpha_K * a * a * rho_plus_P) / (Coeff0 * a * a);
+	A_pi           =  2. * (3. * Mpl2 * alpha_B * alpha_B * (3. * Hconf * Hconf * Hconf_prime - Hconf * Hconf_prime_prime - Hconf_prime * Hconf_prime ) + 3. * Mpl2 * alpha_B * alpha_B_prime * ( Hconf * Hconf * Hconf - Hconf * Hconf_prime) + 
+	3. * alpha_B * a * a * (Hconf * Hconf * rho_plus_P -  Hconf_prime * rho_plus_P) + alpha_K * Hconf * P_s_prime_gev * a * a ) / (Coeff0 * Hconf * a * a);
+
+
+	//double psi, Laplacian_pi, Laplacian_psi;
+
+
+	// Fields = {phi, phi_prime, chi, pi_k, zeta_half, T00, Tij, deltaPm, source}
+
+	Field<Real> * fields[9] = {&phi, &phi_prime, &chi, &pi_k, &zeta_half, &T00, &Tij, &deltaPm, &source};
+	double params[15] = {a, Hconf, Hconf_prime, rho_plus_P, Mpl2, alpha_B, alpha_K, dx, A_deltaPm, A_Laplace_pi, A_Laplace_psi, A_phi_prime, A_psi, A_pi, A_zeta};
+	double * d_params;
+
+	cudaMalloc(&d_params, 15*sizeof(double));
+	cudaMemcpy(d_params, &params, 15*sizeof(double), cudaMemcpyDefault);
+
+	int numpts = phi.lattice().sizeLocal(0);
+	int block_x = phi.lattice().sizeLocal(1);
+	int block_y = phi.lattice().sizeLocal(2);
+
+	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepareTmunu_kgb_functor(), numpts, fields, 9, d_params, nullptr, nullptr);
+
+	cudaDeviceSynchronize();
+
+	cudaFree(d_params);
+
+    /*for (xField.first(); xField.test(); xField.next())
+      {
+		//****************************************************************
+		//Laplace pi, pi(n) since pi is not updated yet
+		//****************************************************************
+		Laplacian_pi = pi_k(xField-0) + pi_k(xField+0) - 2. * pi_k(xField); 
+		Laplacian_pi += pi_k(xField+1) + pi_k(xField-1) - 2. * pi_k(xField);
+		Laplacian_pi += pi_k(xField+2) + pi_k(xField-2) - 2. * pi_k(xField);
+		Laplacian_pi = Laplacian_pi/(dx*dx);
+
+
+		// Laplacian_pi = -1. * (pi_k(xField+0+0) + pi_k(xField-0-0)) + 16.* (pi_k(xField-0) + pi_k(xField+0)) - 30. * pi_k(xField); 
+		// Laplacian_pi += -1. * (pi_k(xField+1+1) + pi_k(xField-1-1)) + 16.* (pi_k(xField-1) + pi_k(xField+1))  - 30. * pi_k(xField);
+		// Laplacian_pi += -1. * (pi_k(xField+2+2) + pi_k(xField-2-2)) + 16.* (pi_k(xField-2) + pi_k(xField+2))  - 30. * pi_k(xField);
+		// Laplacian_pi = Laplacian_pi/(12.*dx*dx);
+
+
+
+		//****************************************************************
+		//Laplace psi, psi(n) since psi is not updated yet
+		//****************************************************************
+		Laplacian_psi = (phi(xField-0)- chi(xField-0)) + (phi(xField+0)- chi(xField+0)) - 2. * (phi(xField)- chi(xField)); 
+		Laplacian_psi += (phi(xField-1)- chi(xField-1)) + (phi(xField+1)- chi(xField+1)) - 2. * (phi(xField)- chi(xField));
+		Laplacian_psi += (phi(xField-2)- chi(xField-2)) + (phi(xField+2)- chi(xField+2)) - 2. * (phi(xField)- chi(xField));
+		Laplacian_psi = Laplacian_psi/(dx*dx);
+
+		psi = phi(xField) - chi(xField); //psi(n)
+        //************************
+        //STRESS TENSOR COMPONENTS
+        //************************
+        // 0-0-component: (Time,Time)
+        // T00(xField)       = -1 * pow(a,3) * (rho_s/rho_crit)+ 0.*((rho_s/rho_crit) -1 * pow(a , 3) * ((Mpl2 / (a * a)) * (alpha_B * Hconf * Laplacian_pi + 3. * alpha_B * Hconf * phi_prime(xField) ) 
+		// 					  ));
+
+	  // T^0_0 = -\rho-\delta\rho, we have also -1 factor from gevolution notation and in the snapshots we record -T^0_0 and this makes everything positive
+		
+		T00(xField)       =   -1 * pow(a , 3)  * ((Mpl2 / (a * a)) * ( alpha_B * Hconf * Laplacian_pi  + 3. * alpha_B * Hconf * Hconf * psi - (3. * alpha_B + alpha_K) * Hconf * Hconf * zeta_half(xField) + 3. * alpha_B * Hconf * phi_prime(xField))
+								+ ( (Mpl2 / (a * a)) * alpha_B * Hconf_prime- (Mpl2 / (a * a)) * alpha_B * Hconf * Hconf + rho_plus_P) * 3. * Hconf * pi_k(xField)); 
+
+		// COUT<< COLORTEXT_CYAN << "delta_rho = "<< COLORTEXT_RESET << T00(xField) << endl;
+		// COUT<< COLORTEXT_LIGHT_BROWN  << "rho_back = "<< COLORTEXT_RESET << -1 * pow(a , 3) * rho_s/rho_crit << endl;					  
+        //*************************************************************************************
+		// T00(xField)  = 0;
+        // 1-1-component: (X,X)
+        Tij(xField, 0, 0) = pow(a , 3) * (+ A_deltaPm * deltaPm(xField) + A_Laplace_psi * Laplacian_psi + A_psi * psi + A_phi_prime * phi_prime(xField) + A_Laplace_pi * Laplacian_pi + A_zeta * zeta_half(xField) + A_pi * pi_k(xField)) ;
+        //*************************************************************************************
+        // 2-2-component: (Y,Y)
+        Tij(xField, 1, 1) = pow(a , 3) * (+ A_deltaPm * deltaPm(xField) + A_Laplace_psi * Laplacian_psi + A_psi * psi + A_phi_prime * phi_prime(xField) + A_Laplace_pi * Laplacian_pi + A_zeta * zeta_half(xField) + A_pi * pi_k(xField)) ;
+        //*************************************************************************************
+        // 3-3-component: (Z,Z)
+        Tij(xField, 2, 2) = pow(a , 3) * (+ A_deltaPm * deltaPm(xField) + A_Laplace_psi * Laplacian_psi + A_psi * psi + A_phi_prime * phi_prime(xField) + A_Laplace_pi * Laplacian_pi + A_zeta * zeta_half(xField) + A_pi * pi_k(xField)) ;
+//  Tij(xField, 0, 0) = 0;
+//  Tij(xField, 1, 1) = 0;
+//  Tij(xField, 2, 2) = 0;
+
+      } */
+  }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+__host__ __device__ void prepare_pi_k(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+
+{
+	   
+	   double Coeff1    = params[0];
+	   double Hcon = params[1];
+	   double dtau = params[2];
+	   double dtau_main = params[3];
+
+	   // Fields = {phi, chi, psi_prime, pi_k, zeta_half} 
+
+	  
+	    Real psi_half =  (*fields[0])(sites[0]) - (*fields[1])(sites[0]) + (*fields[2])(sites[0]) * dtau_main/Real(2); //psi_half (n+1/2) = psi(n) + psi_prime'(n) dtau/2 // assuming psi is constant during a cycle time step of potential update
+        (*fields[3])(sites[0]) = Coeff1 * ( (*fields[3])(sites[0])  + dtau * ( (*fields[4])(sites[0]) - Hcon * (*fields[3])(sites[0])/Real(2) + psi_half ) ); //  pi_k(n+1) - pi Updating which is linear by definition
+
+}
+
+// callable struct for prepareTmunu_kgb
+
+struct prepare_pi_k_functor
+{
+	__host__ __device__ void operator()(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+	{
+		prepare_pi_k(fields, sites, nfields, params, outputs);
+	}
+};
+
+
+
+
+
+
+
+
+
+  template <class FieldType>
+  void update_pi( double dtau, double dtau_main, Field<FieldType> & phi, Field<FieldType> & chi, Field<FieldType> & psi_prime, Field<FieldType> & pi_k , Field<FieldType> & zeta_half, double Hcon)
+  {
+    //double psi_half;
+    double Coeff1 = 1./(1. + Hcon * dtau/2.); // everything at step n+1/2
+
+
+	Field<Real> * fields[5] = {&phi, &chi, &psi_prime, &pi_k, &zeta_half};
+	double params[4] = {Coeff1, Hcon, dtau, dtau_main};
+	double * d_params;
+
+	cudaMalloc(&d_params, 4*sizeof(double));
+	cudaMemcpy(d_params, &params, 4*sizeof(double), cudaMemcpyDefault);
+
+	int numpts = phi.lattice().sizeLocal(0);
+	int block_x = phi.lattice().sizeLocal(1);
+	int block_y = phi.lattice().sizeLocal(2);
+
+	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepare_pi_k_functor(), numpts, fields, 5, d_params, nullptr, nullptr);
+
+	cudaDeviceSynchronize();
+
+	cudaFree(d_params);
+
+    /*for (x.first(); x.test(); x.next())
+      {
+        psi_half =  phi(x) - chi(x) + psi_prime(x) * dtau_main/2.; //psi_half (n+1/2) = psi(n) + psi_prime'(n) dtau/2 // assuming psi is constant during a cycle time step of potential update
+        pi_k(x) = Coeff1 * ( pi_k(x)  + dtau * ( zeta_half(x) - Hcon * pi_k(x)/2. + psi_half ) ); //  pi_k(n+1) - pi Updating which is linear by definition
+      } */
+  }
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+__host__ __device__ void prepare_zeta(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+
+{
+	   
+	   double dtau    = params[0];
+	   double dx = params[1];
+	   double A_Laplace_psi = params[2];
+	   double A_Laplace_pi = params[3];
+	   double A_deltaPm = params[4];
+	   double A_phi_prime = params[5];
+	   double A_psi = params[6];
+	   double A_pi = params[7];
+	   double A_zeta = params[8];
+	   double A_zeta_prime = params[9];
+
+	   // Fields = {phi, phi_prime, chi, pi_k, zeta_half, deltaPm} 
+
+	  
+
+
+		//****************************************************************
+      //Laplace pi, pi(n) since pi is not updated yet
+      //****************************************************************
+      Real Laplacian_pi = (*fields[3])(sites[0]-0) + (*fields[3])(sites[0]+0) - 2. * (*fields[3])(sites[0]); 
+      Laplacian_pi += (*fields[3])(sites[0]+1) + (*fields[3])(sites[0]-1) - 2. * (*fields[3])(sites[0]);
+      Laplacian_pi += (*fields[3])(sites[0]+2) + (*fields[3])(sites[0]-2) - 2. * (*fields[3])(sites[0]);
+      Laplacian_pi = Laplacian_pi/(dx*dx);
+
+	  //****************************************************************
+      //Laplace psi, psi(n) since psi is not updated yet
+      //****************************************************************
+	  Real Laplacian_psi = ((*fields[0])(sites[0]-0)- (*fields[2])(sites[0]-0)) + ((*fields[0])(sites[0]+0)- (*fields[2])(sites[0]+0)) - 2. * ((*fields[0])(sites[0])- (*fields[2])(sites[0])); 
+      Laplacian_psi += ((*fields[0])(sites[0]-1)- (*fields[2])(sites[0]-1)) + ((*fields[0])(sites[0]+1)- (*fields[2])(sites[0]+1)) - 2. * ((*fields[0])(sites[0])- (*fields[2])(sites[0]));
+      Laplacian_psi += ((*fields[0])(sites[0]-2)- (*fields[2])(sites[0]-2)) + ((*fields[0])(sites[0]+2)- (*fields[2])(sites[0]+2)) - 2. * ((*fields[0])(sites[0])- (*fields[2])(sites[0]));
+      Laplacian_psi = Laplacian_psi/(dx*dx);
+
+      Real psi = (*fields[0])(sites[0]) - (*fields[2])(sites[0]); //psi(n)
+
+	  Real C2 = 1./ (1. + (A_zeta / A_zeta_prime)*(dtau/2.));
+
+	  (*fields[4])(sites[0])  = C2 * ( (*fields[4])(sites[0]) - (dtau / A_zeta_prime) * (A_zeta * (*fields[4])(sites[0])/2. + A_pi * (*fields[3])(sites[0]) + A_psi * psi + A_phi_prime * (*fields[1])(sites[0]) 
+	  																+ A_Laplace_pi * Laplacian_pi + A_Laplace_psi * Laplacian_psi + A_deltaPm * (*fields[5])(sites[0])));
+
+}
+
+// callable struct for prepareTmunu_kgb
+
+struct prepare_zeta_functor
+{
+	__host__ __device__ void operator()(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+	{
+		prepare_zeta(fields, sites, nfields, params, outputs);
+	}
+};
+
+
+
+
+
+
+
+
+
+
+template <class FieldType>
+void update_zeta(double dtau, double dx, double a, double fourpiG, double H0_hiclass, Field<FieldType> & phi, Field<FieldType> & chi, Field<FieldType> & phi_prime,
+ Field<FieldType> & pi_k , Field<FieldType> & zeta_half,  Field<FieldType> & deltaPm, double Hconf, double Hconf_prime, double Hconf_prime_prime, double rho_s, double P_s, double P_s_prime, double rho_crit,
+ double alpha_K, double alpha_B, double alpha_K_prime, double alpha_B_prime, int non_linearity )
+{
+  //double C2, zeta_prime, psi, Laplacian_pi, Laplacian_psi;
+  double Mpl2 = 1./(2. * fourpiG); //   fourpiG   1/2 Mpl^2 in the code unit
+
+  // Introducing tilde rho and P
+  double rho_s_tilde     =  3. * rho_s *(2./3.*fourpiG)/(H0_hiclass * H0_hiclass);
+  double P_s_tilde       =  3. * P_s *(2./3.*fourpiG)/(H0_hiclass * H0_hiclass);
+  double P_s_prime_tilde =  3. * P_s_prime *(2./3.*fourpiG)/(H0_hiclass * H0_hiclass) * sqrt(2./3.*fourpiG)/H0_hiclass; // sqrt is for the derivative unit consideration
+
+//   double rho_s_tilde     =   rho_s / rho_crit / Mpl2;
+//   double P_s_tilde       =   P_s / rho_crit / Mpl2 ;
+
+
+  // Other unit transformations
+  alpha_B_prime = alpha_B_prime * sqrt(2./3.*fourpiG)/H0_hiclass; // alpha_B_prime[gevolution]  = alpha_B_prime[hiclass ][1/Mpc] * H_0 [gevolution]/ H_0 [hiclass]
+  alpha_K_prime = alpha_K_prime * sqrt(2./3.*fourpiG)/H0_hiclass; // alpha_K_prime[gevolution]  = alpha_K_prime[hiclass ][1/Mpc] * H_0 [gevolution]/ H_0 [hiclass]
+
+  // Coefficients of the perturbations in the equation of motion for the scalar field perturbation
+  double A_Laplace_psi, A_zeta_prime, A_deltaPm, A_phi_prime, A_Laplace_pi, A_psi, A_pi, A_zeta;
+
+  A_Laplace_psi = - alpha_B / Hconf;
+  A_zeta_prime  = (3./2.) * alpha_B * alpha_B + alpha_K;
+  A_deltaPm     = - (3. * alpha_B * a * a) / (2. * Mpl2 * Hconf);
+  A_phi_prime   = - (3. * alpha_B_prime) / Hconf + alpha_B * (3. - 3. * Hconf_prime / (Hconf * Hconf))  - (3. * a * a / (Hconf * Hconf)) * (rho_s_tilde + P_s_tilde);
+  A_Laplace_pi  = - alpha_B_prime / Hconf - alpha_B * Hconf_prime / (Hconf * Hconf) - (a * a / (Hconf * Hconf)) * (rho_s_tilde + P_s_tilde);
+  A_psi         = - 3. * alpha_B_prime + alpha_B * (3. * Hconf - 3. * Hconf_prime / Hconf) - (3. * a * a / Hconf ) * (rho_s_tilde + P_s_tilde);
+  A_pi          = alpha_B_prime * (3. * Hconf - 3. * Hconf_prime /  Hconf) + alpha_B * (- 3. * Hconf_prime_prime / Hconf + 9. * Hconf_prime - 3. * Hconf_prime * Hconf_prime / (Hconf * Hconf) - 3. * a * a * P_s_prime_tilde / (2. * Hconf)) + a * a * (3. * rho_s_tilde - 3. * Hconf_prime * rho_s_tilde / (Hconf * Hconf) + 3. * P_s_tilde - 3. * Hconf_prime * P_s_tilde / (Hconf * Hconf));
+  A_zeta        = alpha_K_prime + alpha_B * alpha_B * (3. * Hconf + 3. * Hconf_prime / (2. * Hconf)) + alpha_K * (Hconf + 2 * Hconf_prime /  Hconf) + (3./2.) * alpha_B * ( alpha_B_prime - (a * a / Hconf) * (rho_s_tilde + P_s_tilde));
+  
+  
+  	Field<Real> * fields[6] = {&phi, &phi_prime, &chi, &pi_k, &zeta_half, &deltaPm};
+	double params[10] = {dtau, dx, A_Laplace_psi, A_Laplace_pi, A_deltaPm, A_phi_prime, A_psi, A_pi, A_zeta, A_zeta_prime};
+	double * d_params;
+
+	cudaMalloc(&d_params, 10*sizeof(double));
+	cudaMemcpy(d_params, &params, 10*sizeof(double), cudaMemcpyDefault);
+
+	int numpts = phi.lattice().sizeLocal(0);
+	int block_x = phi.lattice().sizeLocal(1);
+	int block_y = phi.lattice().sizeLocal(2);
+
+	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepare_zeta_functor(), numpts, fields, 6, d_params, nullptr, nullptr);
+
+	cudaDeviceSynchronize();
+
+	cudaFree(d_params);
+
+
+  /*for (x.first(); x.test(); x.next())
+    {
+
+	  //****************************************************************
+      //Laplace pi, pi(n) since pi is not updated yet
+      //****************************************************************
+      Laplacian_pi = pi_k(x-0) + pi_k(x+0) - 2. * pi_k(x); 
+      Laplacian_pi += pi_k(x+1) + pi_k(x-1) - 2. * pi_k(x);
+      Laplacian_pi += pi_k(x+2) + pi_k(x-2) - 2. * pi_k(x);
+      Laplacian_pi = Laplacian_pi/(dx*dx);
+
+	  //****************************************************************
+      //Laplace psi, psi(n) since psi is not updated yet
+      //****************************************************************
+	  Laplacian_psi = (phi(x-0)- chi(x-0)) + (phi(x+0)- chi(x+0)) - 2. * (phi(x)- chi(x)); 
+      Laplacian_psi += (phi(x-1)- chi(x-1)) + (phi(x+1)- chi(x+1)) - 2. * (phi(x)- chi(x));
+      Laplacian_psi += (phi(x-2)- chi(x-2)) + (phi(x+2)- chi(x+2)) - 2. * (phi(x)- chi(x));
+      Laplacian_psi = Laplacian_psi/(dx*dx);
+
+      psi = phi(x) - chi(x); //psi(n)
+
+	  C2 = 1./ (1. + (A_zeta / A_zeta_prime)*(dtau/2.));
+
+	  zeta_half(x)  = C2 * ( zeta_half(x) - (dtau / A_zeta_prime) * (A_zeta * zeta_half(x)/2. + A_pi * pi_k(x) + A_psi * psi + A_phi_prime * phi_prime(x) 
+	  																+ A_Laplace_pi * Laplacian_pi + A_Laplace_psi * Laplacian_psi + A_deltaPm * deltaPm(x)));
+    }*/
+
+}   
+
+
+
+
+
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+__host__ __device__ void prepare_derivative(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+
+{
+	    // Fields = {phi, phi_old, chi, chi_old, phi_prime, psi_prime} 
+
+	    (*fields[5])(sites[0]) = (( (*fields[0])(sites[0]) - (*fields[2])(sites[0])) - ((*fields[1])(sites[0]) - (*fields[3])(sites[0]))) / params[0]; //psi'(n)
+        (*fields[4])(sites[0]) = ((*fields[0])(sites[0]) - (*fields[1])(sites[0])) / params[0]; //psi'(n)
+}
+
+// callable struct for prepareTmunu_kgb
+
+struct prepare_derivative_functor
+{
+	__host__ __device__ void operator()(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+	{
+		prepare_derivative(fields, sites, nfields, params, outputs);
+	}
+};
+
+
+
+
+
+
+  template <class FieldType>
+  void derivatives_update(double dtau, int cycle, Field<FieldType> & phi, Field<FieldType> & phi_old, Field<FieldType> & chi, Field<FieldType> & chi_old, Field<FieldType> & phi_prime, Field<FieldType> & psi_prime)
+  {
+
+
+    if (cycle == 0)
+    {
+		thrust::fill_n(thrust::device, psi_prime.data(), psi_prime.lattice().sitesLocalGross(), Real(0));
+		thrust::fill_n(thrust::device, phi_prime.data(), phi_prime.lattice().sitesLocalGross(), Real(0));
+
+    }
+    else
+    {
+
+	Field<Real> * fields[6] = {&phi, &phi_old, &chi, &chi_old, &phi_prime, &psi_prime};
+	double params = dtau;
+	double * d_params;
+
+	cudaMalloc(&d_params, sizeof(double));
+	cudaMemcpy(d_params, &params, sizeof(double), cudaMemcpyDefault);
+
+	int numpts = phi.lattice().sizeLocal(0);
+	int block_x = phi.lattice().sizeLocal(1);
+	int block_y = phi.lattice().sizeLocal(2);
+
+	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepare_derivative_functor(), numpts, fields, 6, d_params, nullptr, nullptr);
+
+	cudaDeviceSynchronize();
+
+	cudaFree(d_params);
+
+      /*for (x.first(); x.test(); x.next())
+        {
+          psi_prime (x) = ((phi(x) - chi(x)) - (phi_old(x) - chi_old(x))) / dtau; //psi'(n)
+          phi_prime (x) = (phi(x) - phi_old(x)) / dtau; //psi'(n)
+        }*/
+    }
+  }
+
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+__host__ __device__ void prepare_old_fields_update(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+
+{
+	    // Fields = {phi, phi_old, chi, chi_old} 
+
+	    (*fields[1])(sites[0]) = (*fields[0])(sites[0]);
+	    (*fields[3])(sites[0]) = (*fields[2])(sites[0]);
+}
+
+
+struct prepare_old_fields_update_functor
+{
+	__host__ __device__ void operator()(Field<Real> * fields[], Site * sites, int nfields, double * params, double * outputs)
+	{
+		prepare_old_fields_update(fields, sites, nfields, params, outputs);
+	}
+};
+
+
+
+template <class FieldType>
+void old_fields_update(Field<FieldType> & phi, Field<FieldType> & phi_old, Field<FieldType> & chi, Field<FieldType> & chi_old)
+  {
+
+	Field<Real> * fields[4] = {&phi, &phi_old, &chi, &chi_old};
+
+	int numpts = phi.lattice().sizeLocal(0);
+	int block_x = phi.lattice().sizeLocal(1);
+	int block_y = phi.lattice().sizeLocal(2);
+
+	lattice_for_each<<<dim3(block_x, block_y), 128>>>(prepare_old_fields_update_functor(), numpts, fields, 4, nullptr, nullptr, nullptr);
+
+	cudaDeviceSynchronize();
+
+	/*for (x.first(); x.test(); x.next())
+		{
+		phi_old(x) = phi(x);
+		chi_old(x) = chi(x);
+		}*/
+  }
+
+
+
 #endif
 

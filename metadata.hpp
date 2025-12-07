@@ -13,6 +13,8 @@
 #ifndef METADATA_HEADER
 #define METADATA_HEADER
 
+#include <cstdint> 
+
 #define GEVOLUTION_VERSION 2.0
 
 #ifndef GRADIENT_ORDER
@@ -69,6 +71,14 @@
 #define MASK_DBARE  8192
 #define MASK_MULTI  16384
 #define MASK_VEL    32768
+//KGB
+#define MASK_PI_K    65536
+#define MASK_ZETA    131072
+#define MASK_T_KGB 262144
+#define MASK_DELTA_KGB  524288
+#define MASK_PHI_PRIME 1048576
+#define MASK_DELTAKGB_DELTA 2097152
+//KGB
 
 #define ICFLAG_CORRECT_DISPLACEMENT 1
 #define ICFLAG_KSPHERE              2
@@ -148,14 +158,18 @@
 #define COLORTEXT_GREEN     "\033[32;1m"
 #define COLORTEXT_RED       "\033[31;1m"
 #define COLORTEXT_YELLOW    "\033[33;1m"
+#define COLORTEXT_BLUE     "\033[1;34m"
 #define COLORTEXT_RESET     "\033[0m"
+#define COLORTEXT_LIGHT_BROWN "\033[33m"
 #else
-#define COLORTEXT_WHITE     ""
-#define COLORTEXT_CYAN      ""
-#define COLORTEXT_GREEN     ""
-#define COLORTEXT_RED       ""
-#define COLORTEXT_YELLOW    ""
-#define COLORTEXT_RESET     ""
+#define COLORTEXT_WHITE       ""
+#define COLORTEXT_CYAN        ""
+#define COLORTEXT_GREEN       ""
+#define COLORTEXT_RED         ""
+#define COLORTEXT_YELLOW      ""
+#define COLORTEXT_BLUE        ""
+#define COLORTEXT_RESET       ""
+#define COLORTEXT_LIGHT_BROWN ""
 #endif
 
 // header structure for GADGET-2 files [V. Springel, N. Yoshida, and S.D. White, New Astron. 6 (2001) 79
@@ -264,6 +278,14 @@ struct metadata
 	char output_path[PARAM_MAX_LENGTH];
 	char restart_path[PARAM_MAX_LENGTH];
 	char basename_restart[PARAM_MAX_LENGTH];
+		// KGB part
+	int check_bg_file;                             // 0 means there will be no check_bg_file and 1 means a check_bg_file is generated
+    int num_snapshot_kgb;                         // not too important as it was originally defined for illustrating blowup (only appears here and in parser.hpp)
+	int n_kgb_numsteps;
+	int kgb_source_gravity;
+    int NL_kgb;                                   // 0 means using only linear kgb equations, 1 means adding also nonlinearities
+    int bg_hiclass;                               // Using hiclass to evaluate time dependence of quantities!
+	// KGB end
 };
 
 struct icsettings
@@ -288,6 +310,10 @@ struct icsettings
 	double A_s;
 	double n_s;
 	double k_pivot;
+		int IC_kgb ;                        // Initial conditions for KGB fields (pi, zeta); 0 is from CLASS, 2 is from HICLASS and 1 is provided by a (separate) file.
+	char tk_kgb[PARAM_MAX_LENGTH];       // KGB field transfer function, this is only relevant if the IC of KGB is provided by a (separate) file, i.e. IC_kgb==1
+	                                     //(not relevant in our case; see parser.hpp and settings.ini).
+	// KGB end
 };
 
 struct cosmology
@@ -309,9 +335,97 @@ struct cosmology
 	double m_ncdm[MAX_PCL_SPECIES-2];
 	double T_ncdm[MAX_PCL_SPECIES-2];
 	double deg_ncdm[MAX_PCL_SPECIES-2];
+
+	double Xt;
+	double g0;
+	double g2;
+	double g4;
+	double phi_i;
+	double X_i;
+
+
+	// KGB part
+	int gravity_model;                  // 0 is the propto_omega, 1 is propto_scale, 2 is constant_alphas
+	int expansion_model;                // 0 is wowa
+	double bg_i[2];
+	double Omega_kgb;
+	double w_kgb;
+	double w_a_kgb;
+	double x_i[5];
+  	double x_k;                         // alpha_K_hat, kineticity
+  	double x_b;                         // alpha_B_hat, braiding
+  	double x_m = 0;
+  	double x_t = 0;
+  	double M_star_ini = 1.0;
+	// KGB end
+
 #ifdef HAVE_CLASS
+	gsl_spline * H_spline;
+	gsl_interp_accel * acc_H_s;
+
 	gsl_spline * Hspline;
 	gsl_interp_accel * acc_H;
+
+	gsl_spline * H_prime_spline;
+	gsl_interp_accel * acc_H_prime;
+
+	gsl_spline * H_prime_prime_spline;
+	gsl_interp_accel * acc_H_prime_prime;
+
+	gsl_spline * rho_cdm_spline;
+	gsl_interp_accel * acc_rho_cdm;
+
+	gsl_spline * rho_b_spline;
+	gsl_interp_accel * acc_rho_b;
+
+	gsl_spline * rho_g_spline;
+	gsl_interp_accel * acc_rho_g;
+
+	gsl_spline * rho_crit_spline;
+	gsl_interp_accel * acc_rho_crit;
+
+	gsl_spline * rho_ur_spline;
+	gsl_interp_accel * acc_rho_ur;
+
+	gsl_spline * cs2_spline;
+	gsl_interp_accel * acc_cs2;
+
+	gsl_spline * cs2_prime_spline;
+	gsl_interp_accel * acc_cs2_prime;
+
+	gsl_spline * rho_smg_spline;
+	gsl_interp_accel * acc_rho_smg;
+
+	gsl_spline * rho_smg_prime_spline;
+	gsl_interp_accel * acc_rho_smg_prime;
+
+	gsl_spline * p_smg_spline;
+	gsl_interp_accel * acc_p_smg;
+
+	gsl_spline * p_smg_prime_spline;
+	gsl_interp_accel * acc_p_smg_prime;
+
+	gsl_spline * alpha_K_spline;
+	gsl_interp_accel * acc_alpha_K;
+
+	gsl_spline * alpha_K_prime_spline;
+	gsl_interp_accel * acc_alpha_K_prime;
+
+	gsl_spline * alpha_B_spline;
+	gsl_interp_accel * acc_alpha_B;
+
+	gsl_spline * alpha_B_prime_spline;
+	gsl_interp_accel * acc_alpha_B_prime;
+
+	gsl_spline * cs2num_spline;
+	gsl_interp_accel * acc_cs2num;
+
+	gsl_spline * kin_D_spline;
+	gsl_interp_accel * acc_kin_D;
+
+	gsl_spline * lambda_2_spline;
+	gsl_interp_accel * acc_lambda_2;
+
 	gsl_spline * tauspline;
 	gsl_interp_accel * acc_tau;
 #endif

@@ -207,6 +207,77 @@ double Hconf(const double a, const double fourpiG, const cosmology cosmo)
 		return sqrt((2. * fourpiG / 3.) * (((cosmo.Omega_cdm + cosmo.Omega_b + bg_ncdm(a, cosmo)) / a) + (cosmo.Omega_Lambda * a * a) + (cosmo.Omega_rad / a / a) + (cosmo.Omega_fld * exp(3. * cosmo.wa_fld * (a - 1.)) / pow(a, 1. + 3. * (cosmo.w0_fld + cosmo.wa_fld)))));
 }
 
+//////////////////////////
+// Hconf_prime
+//////////////////////////
+// Description:
+//   computes the conformal Hubble rate derivative at given scale factor
+//
+// Arguments:
+//   a          scale factor
+//   fourpiG    "4 pi G"
+//   H_spline   Class spline with physical H
+//   acc        Gsl acc parameter
+//   cosmo      structure containing the cosmological parameters
+//
+// Returns: conformal Hubble rate
+//
+//////////////////////////
+// Hconf normalized to critial density so we have H0^2= 8piG/3
+double Hconf_prime(const double a, const double fourpiG,const cosmology cosmo)
+
+{
+	double norm = sqrt(2./3.*fourpiG)/gsl_spline_eval(cosmo.Hspline, 1., cosmo.acc_H);
+	double Hc = Hconf(a, fourpiG, cosmo);
+	// dHc/da = H + a*d(H)/da
+	double dHcda = Hc/a + a*norm*gsl_spline_eval_deriv(cosmo.Hspline, a, cosmo.acc_H);
+	// dHconf/dtau = a*Hc*dHc/da
+	return a*Hc*dHcda;
+}
+
+
+
+//////////////////////////
+// Hconf_prime_prime
+//////////////////////////
+// Description:
+//   computes the  second time derivative of the conformal Hubble parameter at given scale factor
+//
+// Arguments:
+//   a          scale factor
+//   fourpiG    "4 pi G"
+//   H_spline   Class spline with physical H
+//   acc        Gsl acc parameter
+//   cosmo      structure containing the cosmological parameters
+//
+// Returns: second time derivative of the conformal Hubble parameter
+//
+//////////////////////////
+// Hconf normalized to critial density so we have H0^2= 8piG/3
+
+
+
+
+
+double Hconf_prime_prime(const double a, const double fourpiG,const cosmology cosmo)
+
+{
+	double norm = sqrt(2./3.*fourpiG)/gsl_spline_eval(cosmo.Hspline, 1., cosmo.acc_H);
+	double Ha = gsl_spline_eval(cosmo.Hspline, a, cosmo.acc_H);
+	double Hc = Hconf(a, fourpiG, cosmo);
+	double Hc_prime = Hconf_prime(a, fourpiG, cosmo);
+
+	double dHda = gsl_spline_eval_deriv(cosmo.Hspline, a, cosmo.acc_H); // dH/da
+    double d2Hda2 = gsl_spline_eval_deriv2(cosmo.Hspline, a, cosmo.acc_H); // d2H/da2
+
+	double term1 = 2. * Hc_prime * Hc;
+    double term2 = (2. * a * a * dHda + a * a * a * d2Hda2) * Hc * Hc*norm;
+	//double term2 = norm *(2*a*a*a*Ha*dHda+a*a*a*a*Ha*d2Hda2)* Hc;
+    double term3 = norm * a * a * dHda * Hc_prime;
+
+	return term1+term2+term3;
+}
+
 
 double Omega_m(const double a, const cosmology cosmo) { return cosmo.Omega_m / (cosmo.Omega_cdm + cosmo.Omega_b + bg_ncdm(a, cosmo) + cosmo.Omega_Lambda * a * a * a + cosmo.Omega_rad / a + cosmo.Omega_fld * exp(3. * cosmo.wa_fld * (a - 1.)) / pow(a, 3. * (cosmo.w0_fld + cosmo.wa_fld))); }
 
